@@ -1,0 +1,12 @@
+# SARS - Scientific Architectural Restoration System
+# Step 1: PDF Ingestion and RAG Pipeline
+# Requirements for Templum Divi Augusti research project
+
+langchain
+langchain-community
+langchain-huggingface
+langchain-text-splitters
+chromadb
+pymupdf
+sentence-transformers
+torch  # CPU-only: pip install torch --index-url https://download.pytorch.org/whl/cpu
