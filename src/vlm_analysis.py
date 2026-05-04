@@ -27,10 +27,52 @@ OTTOMAN_TERMS = [
     "hacı bayram", "haci bayram", "geometric ornament", "byzantine", "medieval",
 ]
 
-# Folders that get two-pass RAG analysis
 TWO_PASS_FOLDERS = {"full_shots", "architectural_models"}
-# Folders that get a short plans-extraction prompt
 PLANS_FOLDERS = {"plans"}
+
+
+# ---------------------------------------------------------------------------
+# Hardware detection
+# ---------------------------------------------------------------------------
+
+def detect_vlm_hardware() -> dict:
+    if torch.cuda.is_available():
+        gpu = torch.cuda.get_device_name(0)
+        vram = torch.cuda.get_device_properties(0).total_memory / 1e9
+        return {
+            "device": "cuda",
+            "torch_dtype": torch.float16,
+            "gpu_name": gpu,
+            "vram_gb": round(vram, 1),
+        }
+    else:
+        return {
+            "device": "cpu",
+            "torch_dtype": torch.bfloat16,
+            "gpu_name": None,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
+def load_gemma3_vlm():
+    hw = detect_vlm_hardware()
+    if hw["device"] == "cuda":
+        print(f"VLM on GPU: {hw['gpu_name']} | ~1-2 min/image")
+    else:
+        print("VLM on CPU | ~14 min/image")
+
+    processor = AutoProcessor.from_pretrained(MODEL_ID)
+    model = AutoModelForImageTextToText.from_pretrained(
+        MODEL_ID,
+        dtype=hw["torch_dtype"],
+        device_map="auto",
+        offload_buffers=True,
+    )
+    model.eval()
+    return processor, model
 
 
 # ---------------------------------------------------------------------------
@@ -109,48 +151,56 @@ Respond in JSON only. Be brief.\
 
 
 # ---------------------------------------------------------------------------
-# JSON extraction (FIX 1)
+# JSON extraction
 # ---------------------------------------------------------------------------
 
-def extract_json_from_response(response: str) -> dict:
+def extract_json_from_response(response: str, debug: bool = False) -> dict:
+    import re
+
+    if debug:
+        print(f"\n  [DEBUG] Raw response length: {len(response)} chars")
+        print(f"  [DEBUG] Raw response START:\n{response[:500]}")
+        print(f"  [DEBUG] Raw response END:\n{response[-300:]}")
+
     text = response.strip()
 
-    if "```json" in text:
-        text = text.split("```json", 1)[1]
-        text = text.split("```", 1)[0] if "```" in text else text
-    elif "```" in text:
-        text = text.split("```", 1)[1]
-        text = text.split("```", 1)[0] if "```" in text else text
-
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
     text = text.strip()
+
+    start = text.find('{')
+    end = text.rfind('}')
+
+    if start == -1 or end == -1:
+        if debug:
+            print(f"  [DEBUG] No JSON braces found in response.")
+        return {"error": "no_json_found", "raw": response}
+
+    text = text[start:end+1]
 
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        if debug:
+            print(f"  [DEBUG] json.loads failed: {e}")
+            print(f"  [DEBUG] Extracted JSON candidate ({len(text)} chars):\n{text[:600]}")
 
-    # Repair truncated JSON by closing open structures after last complete pair
     try:
-        last_complete = max(
-            text.rfind('"},'),
-            text.rfind('"]'),
-            text.rfind('},'),
-        )
-        if last_complete > 0:
-            truncated = text[:last_complete + 2]
-            open_braces = truncated.count("{") - truncated.count("}")
-            open_brackets = truncated.count("[") - truncated.count("]")
-            truncated += "]" * open_brackets
-            truncated += "}" * open_braces
-            return json.loads(truncated)
-    except (json.JSONDecodeError, ValueError):
-        pass
+        open_b = text.count('{') - text.count('}')
+        open_br = text.count('[') - text.count(']')
+        if debug:
+            print(f"  [DEBUG] Bracket mismatch: {{}} unmatched={open_b}, [] unmatched={open_br}")
+        fixed = text + (']' * open_br) + ('}' * open_b)
+        return json.loads(fixed)
+    except Exception as e2:
+        if debug:
+            print(f"  [DEBUG] Bracket-fix attempt also failed: {e2}")
 
-    return {"error": "json_parse_failed", "raw_response": response[:500]}
+    return {"error": "json_parse_failed", "raw": response}
 
 
 # ---------------------------------------------------------------------------
-# SDXL sanitization (FIX 5)
+# SDXL sanitization
 # ---------------------------------------------------------------------------
 
 def sanitize_sdxl_component(text: str) -> str:
@@ -162,10 +212,27 @@ def sanitize_sdxl_component(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Image resize
+# ---------------------------------------------------------------------------
+
+def resize_for_vlm(image_path: str, max_size: int = 896) -> Image.Image:
+    image = Image.open(image_path).convert("RGB")
+    image.thumbnail((max_size, max_size), Image.LANCZOS)
+    return image
+
+
+# ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
 
-def build_analysis_prompt(keywords: list, folder: str, rag_context: str = "") -> str:
+def build_analysis_prompt(
+    keywords: list,
+    folder: str,
+    rag_context: str = "",
+    prompt_override: str = "",
+) -> str:
+    if prompt_override:
+        return prompt_override
     if folder in PLANS_FOLDERS:
         return PLANS_PROMPT
 
@@ -223,9 +290,13 @@ def analyze_image(
     processor,
     model,
     rag_context: str = "",
+    prompt_override: str = "",
+    debug: bool = False,
 ) -> dict:
-    image = Image.open(image_path).convert("RGB")
-    prompt_text = build_analysis_prompt(keywords, folder, rag_context)
+    image = resize_for_vlm(image_path)
+    prompt_text = build_analysis_prompt(
+        keywords, folder, rag_context, prompt_override
+    )
 
     messages = [
         {
@@ -237,6 +308,7 @@ def analyze_image(
         }
     ]
 
+    # Original working approach: let apply_chat_template handle image+text together
     inputs = processor.apply_chat_template(
         messages,
         add_generation_prompt=True,
@@ -246,17 +318,50 @@ def analyze_image(
     ).to(model.device)
 
     input_len = inputs["input_ids"].shape[-1]
+    # token_type_ids is not accepted by generate()
+    generate_inputs = {k: v for k, v in inputs.items() if k != "token_type_ids"}
+
+    # With device_map="auto", model.device can be "meta" or "cpu" — force cuda:0
+    target_device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    generate_inputs = {k: v.to(target_device) if hasattr(v, "to") else v
+                       for k, v in generate_inputs.items()}
+
+    if debug:
+        print(f"  [DEBUG] Input tokens: {input_len}")
+        print(f"  [DEBUG] model.device: {model.device}")
+        print(f"  [DEBUG] target_device: {target_device}")
+        print(f"  [DEBUG] input_ids device: {generate_inputs['input_ids'].device}")
+        print(f"  [DEBUG] generate inputs keys: {list(generate_inputs.keys())}")
 
     with torch.no_grad():
         output_ids = model.generate(
-            **inputs,
-            max_new_tokens=1200,
+            **generate_inputs,
+            max_new_tokens=2048,
             do_sample=False,
         )
 
-    new_tokens = output_ids[0][input_len:]
-    raw_response = processor.decode(new_tokens, skip_special_tokens=True)
-    return extract_json_from_response(raw_response)
+    if debug:
+        print(f"  [DEBUG] output_ids shape: {output_ids.shape}, input_len: {input_len}")
+
+    generated = output_ids[0][input_len:]
+
+    if debug:
+        print(f"  [DEBUG] Output tokens generated: {len(generated)}")
+        sample_ids = generated[:20].tolist()
+        print(f"  [DEBUG] First 20 token IDs: {sample_ids}")
+        if len(generated) >= 2047:
+            print("  [DEBUG] *** OUTPUT MAY BE TRUNCATED — hit max_new_tokens limit ***")
+
+    # Try processor.decode first (same as what worked locally), then tokenizer.decode
+    raw_response = processor.decode(generated, skip_special_tokens=True)
+    if debug:
+        print(f"  [DEBUG] processor.decode result len={len(raw_response)} | preview: {repr(raw_response[:300])}")
+
+    if not raw_response.strip():
+        raw_response = processor.tokenizer.decode(generated, skip_special_tokens=True)
+        if debug:
+            print(f"  [DEBUG] tokenizer.decode fallback len={len(raw_response)} | preview: {repr(raw_response[:300])}")
+    return extract_json_from_response(raw_response, debug=debug)
 
 
 # ---------------------------------------------------------------------------
@@ -270,13 +375,14 @@ def run_two_pass_analysis(
     vector_store,
     processor,
     model,
+    debug: bool = False,
 ) -> dict:
     print("  [Pass 1] Running inference (no RAG)...", flush=True)
-    result = analyze_image(image_path, keywords, folder, processor, model)
+    result = analyze_image(image_path, keywords, folder, processor, model, debug=debug)
 
     if "error" in result:
         result["pass"] = "two_pass_failed"
-        print(f"  [WARN] Pass 1 JSON parse failed — skipping image, saving error.")
+        print(f"  [WARN] Pass 1 JSON parse failed (error={result['error']}) — skipping image, saving error.")
         return result
 
     rag_query_text = result.get("rag_search_query", "")
@@ -297,11 +403,12 @@ def run_two_pass_analysis(
         result = analyze_image(
             image_path, keywords, folder, processor, model,
             rag_context=rag_context,
+            debug=debug,
         )
 
         if "error" in result:
             result["pass"] = "two_pass_failed"
-            print(f"  [WARN] Pass 2 JSON parse failed — saving error.")
+            print(f"  [WARN] Pass 2 JSON parse failed (error={result['error']}) — saving error.")
             result["retrieved_citations"] = citations
             return result
 
@@ -311,7 +418,137 @@ def run_two_pass_analysis(
 
 
 # ---------------------------------------------------------------------------
-# Worker for ThreadPoolExecutor (FIX 8)
+# GPU-optimized batch runner (Colab)
+# ---------------------------------------------------------------------------
+
+def run_colab_batch(
+    conditioning_registry_path: str,
+    vector_store,
+    output_dir: str,
+    resume: bool = True,
+) -> list:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(conditioning_registry_path, encoding="utf-8") as f:
+        registry = json.load(f)
+
+    eligible = [
+        e for e in registry
+        if "vlm_analysis" in e.get("suitable_for", [])
+    ]
+
+    if resume:
+        completed = set()
+        for f in output_dir.glob("*_analysis.json"):
+            try:
+                text = f.read_text(encoding="utf-8")
+                if '"error"' not in text:
+                    completed.add(f.stem.replace("_analysis", ""))
+            except Exception:
+                pass
+        eligible = [
+            e for e in eligible
+            if Path(e["source_filename"]).stem not in completed
+        ]
+        print(f"Resuming: {len(eligible)} remaining")
+
+    _self = sys.modules[__name__]
+    processor = getattr(_self, "_colab_processor", None)
+    model = getattr(_self, "_colab_model", None)
+    if processor is None or model is None:
+        raise RuntimeError(
+            "Call load_gemma3_vlm() and assign results to "
+            "vlm_analysis._colab_processor and vlm_analysis._colab_model "
+            "before run_colab_batch(), or use the colab_pipeline notebook."
+        )
+
+    total = len(eligible)
+    results = []
+
+    for i, entry in enumerate(eligible):
+        filename = entry["source_filename"]
+        folder = entry["source_folder"]
+        keywords = entry.get("keywords", [])
+
+        print(f"\n[{i+1}/{total}] {filename}")
+        print(f"  folder: {folder} | tier: {entry['credibility_tier']}")
+
+        if torch.cuda.is_available():
+            mem_used = torch.cuda.memory_allocated() / 1e9
+            mem_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+            print(f"  GPU: {mem_used:.1f}/{mem_total:.1f}GB used")
+
+        start = time.time()
+        source_path = entry.get("source_path") or \
+            f"data/visual_sources/{folder}/{filename}"
+
+        try:
+            if folder in PLANS_FOLDERS:
+                result = analyze_image(
+                    source_path, keywords, folder, processor, model,
+                    prompt_override=PLANS_PROMPT,
+                    debug=True,
+                )
+                result["pass"] = "plans_extraction"
+            elif folder in TWO_PASS_FOLDERS:
+                result = run_two_pass_analysis(
+                    source_path, keywords, folder,
+                    vector_store, processor, model,
+                    debug=True,
+                )
+            else:
+                result = analyze_image(
+                    source_path, keywords, folder, processor, model,
+                    debug=True,
+                )
+                result["pass"] = "single_pass"
+
+            result["mosque_interference"] = result.get("mosque_interference", "unknown")
+            if "sdxl_prompt_component" in result:
+                result["sdxl_prompt_component"] = sanitize_sdxl_component(
+                    result["sdxl_prompt_component"]
+                )
+            result.update({
+                "source_filename": filename,
+                "source_folder": folder,
+                "credibility_tier": entry["credibility_tier"],
+                "analysis_timestamp": datetime.now().isoformat(),
+            })
+
+            elapsed = time.time() - start
+            print(f"  ✓ Done in {elapsed:.0f}s | "
+                  f"pass: {result.get('pass')} | "
+                  f"mosque: {result.get('mosque_interference')}")
+
+        except Exception as e:
+            result = {
+                "error": str(e),
+                "source_filename": filename,
+                "source_folder": folder,
+                "pass": "failed",
+                "analysis_timestamp": datetime.now().isoformat(),
+            }
+            print(f"  ✗ Failed: {e}")
+
+        stem = Path(filename).stem
+        out_path = output_dir / f"{stem}_analysis.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+
+        results.append(result)
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    succeeded = sum(1 for r in results if "error" not in r)
+    print(f"\n{'='*50}")
+    print(f"Batch complete: {succeeded}/{total} succeeded")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# CPU batch worker (local)
 # ---------------------------------------------------------------------------
 
 _write_lock = threading.Lock()
@@ -328,7 +565,6 @@ def _analyze_worker(args: tuple) -> dict:
 
     filename = entry["source_filename"]
     folder = entry["source_folder"]
-    source_type = entry["source_type"]
     keywords = entry.get("keywords", [])
     out_file = Path(output_dir) / f"{Path(filename).stem}_analysis.json"
 
@@ -340,12 +576,13 @@ def _analyze_worker(args: tuple) -> dict:
     t0 = time.time()
     print(f"\n>>> Starting: {filename} | {folder}", flush=True)
 
-    # Heartbeat thread — prints elapsed time every 60s so you know it's alive
     stop_heartbeat = threading.Event()
+
     def _heartbeat():
         while not stop_heartbeat.wait(60):
             elapsed = int(time.time() - t0)
             print(f"  [alive] {filename} — {elapsed}s elapsed", flush=True)
+
     hb = threading.Thread(target=_heartbeat, daemon=True)
     hb.start()
 
@@ -353,6 +590,7 @@ def _analyze_worker(args: tuple) -> dict:
         if folder in PLANS_FOLDERS:
             result = analyze_image(
                 entry["source_path"], keywords, folder, processor, model,
+                prompt_override=PLANS_PROMPT,
             )
             result["pass"] = "plans_extraction"
         elif folder in TWO_PASS_FOLDERS:
@@ -366,15 +604,11 @@ def _analyze_worker(args: tuple) -> dict:
             )
             result["pass"] = "single_pass"
 
-        # FIX 4: explicit mosque_interference extraction
         result["mosque_interference"] = result.get("mosque_interference", "unknown")
-
-        # FIX 5: sanitize sdxl component
         if "sdxl_prompt_component" in result:
             result["sdxl_prompt_component"] = sanitize_sdxl_component(
                 result["sdxl_prompt_component"]
             )
-
         result["source_filename"] = filename
         result["source_folder"] = folder
         result["credibility_tier"] = entry["credibility_tier"]
@@ -396,14 +630,18 @@ def _analyze_worker(args: tuple) -> dict:
     mosque = result.get("mosque_interference", "?")
     quality = result.get("roman_fabric_quality", "?")
     pass_type = result.get("pass", "?")
-    print(f"  └─ Done in {elapsed:.1f}s | pass: {pass_type} | mosque: {mosque} | quality: {quality}", flush=True)
+    print(
+        f"  └─ Done in {elapsed:.1f}s | pass: {pass_type} | "
+        f"mosque: {mosque} | quality: {quality}",
+        flush=True,
+    )
 
     _save_result(result, out_file)
     return result
 
 
 # ---------------------------------------------------------------------------
-# Batch processing (FIX 8 + FIX 9)
+# CPU batch processing (local)
 # ---------------------------------------------------------------------------
 
 def process_all_images(
@@ -423,19 +661,18 @@ def process_all_images(
         registry = json.load(f)
 
     candidates = [e for e in registry if "vlm_analysis" in e.get("suitable_for", [])]
-
     if limit:
         candidates = candidates[:limit]
 
     two_pass = [e for e in candidates if e["source_folder"] in TWO_PASS_FOLDERS]
-    single   = [e for e in candidates if e["source_folder"] not in TWO_PASS_FOLDERS
-                                      and e["source_folder"] not in PLANS_FOLDERS]
-    plans    = [e for e in candidates if e["source_folder"] in PLANS_FOLDERS]
+    single = [e for e in candidates if e["source_folder"] not in TWO_PASS_FOLDERS
+              and e["source_folder"] not in PLANS_FOLDERS]
+    plans = [e for e in candidates if e["source_folder"] in PLANS_FOLDERS]
 
     total = len(candidates)
     avg_min = 14
     print(f"Total images to analyze : {total}")
-    print(f"  Two-pass (RAG)        : {len(two_pass)}  (full_shots + architectural_models)")
+    print(f"  Two-pass (RAG)        : {len(two_pass)}")
     print(f"  Single-pass           : {len(single)}")
     print(f"  Plans extraction      : {len(plans)}")
     print(f"Estimated time          : ~{total * avg_min} min at ~{avg_min} min/image")
@@ -449,18 +686,17 @@ def process_all_images(
             zip(candidates, executor.map(_analyze_worker, tasks)), start=1
         ):
             filename = entry["source_filename"]
-            folder   = entry["source_folder"]
+            folder = entry["source_folder"]
             pass_type = result.get("pass", "?")
-            skipped = "[SKIP] " if (Path(output_dir) / f"{Path(filename).stem}_analysis.json").exists() else ""
-            print(f"[ {idx}/{total} ] {skipped}{filename} | {folder} | {pass_type}")
+            print(f"[ {idx}/{total} ] {filename} | {folder} | {pass_type}")
             all_results.append(result)
 
     succeeded = sum(1 for r in all_results if "error" not in r)
-    failed    = total - succeeded
+    failed = total - succeeded
 
     mosque_counts = Counter(r.get("mosque_interference", "unknown") for r in all_results)
     fabric_counts = Counter(r.get("roman_fabric_quality", "unknown") for r in all_results)
-    tier_counts   = Counter(r.get("credibility_tier", "unknown") for r in all_results)
+    tier_counts = Counter(r.get("credibility_tier", "unknown") for r in all_results)
 
     master = {
         "summary": {
@@ -523,12 +759,15 @@ def build_negative_prompt(analysis_results: list) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Entry point — test run (limit=5)
+# Entry point (local CPU run)
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    from huggingface_hub import login
     from langchain_community.vectorstores import Chroma
     from langchain_huggingface import HuggingFaceEmbeddings
+
+    login()  # will prompt for token or use HF_TOKEN env var
 
     BASE = Path(__file__).parent.parent
 
@@ -544,14 +783,8 @@ if __name__ == "__main__":
         persist_directory=str(BASE / "data" / "chroma_db"),
     )
 
-    print(f"Loading {MODEL_ID} — this will take a few minutes on CPU...")
-    processor = AutoProcessor.from_pretrained(MODEL_ID)
-    model = AutoModelForImageTextToText.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-    )
-    model.eval()
+    print(f"Loading {MODEL_ID}...")
+    processor, model = load_gemma3_vlm()
     print("Model loaded.\n")
 
     results = process_all_images(

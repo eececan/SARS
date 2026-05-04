@@ -18,3 +18,7 @@ opencv-python
 
 # Step 3: VLM Structural Analysis
 accelerate
+
+# Step 4: 3D Model Generation and Refinement
+diffusers
+psutil
