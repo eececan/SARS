@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Templum Divi Augusti · Reconstruction</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f5f0e8;
+      --surface:  #ffffff;
+      --border:   #d4c4a0;
+      --border-lt:#ede3cc;
+      --accent:   #8b6914;
+      --accent-dk:#5c4a32;
+      --text:     #2c2416;
+      --text-mid: #7a6040;
+      --text-lt:  #a0926e;
+      --badge-h-bg: #d4edda; --badge-h-fg: #155724;
+      --badge-m-bg: #fff3cd; --badge-m-fg: #856404;
+      --badge-p-bg: #e2e3e5; --badge-p-fg: #495057;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ---- Header ---- */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 18px 32px 14px;
+      border-bottom: 2px solid var(--accent);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    header h1 {
+      font-family: Georgia, serif;
+      font-size: 1.2rem;
+      font-weight: normal;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+    header .subtitle {
+      font-size: 0.78rem;
+      color: var(--accent);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    /* ---- Nav ---- */
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 0;
+    }
+    .nav-btn {
+      padding: 11px 22px;
+      border: none;
+      background: none;
+      font-size: 0.82rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: var(--text-mid);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.1s;
+    }
+    .nav-btn:hover { color: var(--text); }
+    .nav-btn.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+
+    /* ---- Main container ---- */
+    main { max-width: 1320px; margin: 0 auto; padding: 28px 32px 80px; }
+
+    /* ---- Section headings ---- */
+    .section-title {
+      font-family: Georgia, serif;
+      font-size: 1rem;
+      font-weight: normal;
+      color: var(--accent-dk);
+      letter-spacing: 0.03em;
+      margin-bottom: 18px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ---- Pages ---- */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ============================================================
+       PAGE: Reconstructions
+    ============================================================ */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+      margin-bottom: 48px;
+    }
+    .hero-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: box-shadow 0.15s;
+    }
+    .hero-card:hover { box-shadow: 0 6px 20px rgba(139,105,20,0.18); }
+    .hero-card img {
+      width: 100%;
+      height: 300px;
+      object-fit: cover;
+      display: block;
+    }
+    .hero-card-placeholder {
+      width: 100%;
+      height: 300px;
+      background: #f0ede6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-lt);
+      font-size: 0.85rem;
+      text-align: center;
+      padding: 16px;
+      gap: 8px;
+    }
+    .hero-card-placeholder .ph-icon { font-size: 2rem; opacity: 0.4; }
+    .hero-card-footer {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .hero-card-title {
+      font-family: Georgia, serif;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .hero-card-meta {
+      font-size: 0.75rem;
+      color: var(--text-lt);
+    }
+    .hero-empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 56px 24px;
+      color: var(--text-lt);
+      font-style: italic;
+      font-size: 0.95rem;
+      background: #f5f2eb;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+    }
+
+    /* Provenance panel below hero */
+    .prov-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 20px 24px;
+    }
+    .prov-panel h3 {
+      font-family: Georgia, serif;
+      font-size: 0.85rem;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .prov-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border-lt);
+      margin-bottom: 16px;
+    }
+    .prov-tab-btn {
+      padding: 7px 18px;
+      border: none;
+      background: none;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: var(--text-mid);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .prov-tab-btn.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+    .prov-tab-panel { display: none; }
+    .prov-tab-panel.active { display: block; }
+
+    /* Citations / Brief shared styles */
+    .stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+    .stat-box {
+      display: inline-flex;
+      flex-direction: column;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 8px 16px;
+      min-width: 120px;
+    }
+    .stat-label { font-size: 0.72rem; color: var(--text-lt); text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat-value { font-family: Georgia, serif; font-size: 1.25rem; color: var(--text); }
+
+    .confidence-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-top: 12px;
+    }
+    .confidence-table th {
+      text-align: left;
+      padding: 6px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-mid);
+      font-weight: 600;
+    }
+    .confidence-table td { padding: 6px 10px; border: 1px solid var(--border-lt); }
+    .confidence-bar {
+      display: inline-block;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .citations-numbered { list-style: decimal; padding-left: 20px; }
+    .citations-numbered li {
+      font-size: 0.82rem;
+      padding: 4px 0;
+      color: var(--text);
+      border-bottom: 1px solid var(--border-lt);
+    }
+
+    .brief-list { list-style: none; counter-reset: brief-counter; }
+    .brief-list li {
+      counter-increment: brief-counter;
+      display: flex;
+      gap: 10px;
+      font-size: 0.83rem;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border-lt);
+    }
+    .brief-list li::before {
+      content: counter(brief-counter);
+      color: var(--accent);
+      font-family: Georgia, serif;
+      font-size: 0.78rem;
+      min-width: 18px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .inferred-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .inferred-tag {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+      color: var(--accent-dk);
+    }
+    .brief-section { margin-bottom: 24px; }
+    .brief-section h4 {
+      font-family: Georgia, serif;
+      font-size: 0.82rem;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border-lt);
+    }
+
+    /* ============================================================
+       PAGE: Canny / Depth Viewer
+    ============================================================ */
+    .cond-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .cond-sidebar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      position: sticky;
+      top: 100px;
+      max-height: calc(100vh - 130px);
+      display: flex;
+      flex-direction: column;
+    }
+    .cond-sidebar-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cond-search {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .cond-search:focus { outline: 1px solid var(--accent); }
+    .cond-filter-select {
+      width: 100%;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+    .cond-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+    .cond-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border-lt);
+      transition: background 0.1s;
+    }
+    .cond-item:hover { background: #f5f0e8; }
+    .cond-item.selected { background: #ede5d0; border-left: 3px solid var(--accent); }
+    .cond-item-name {
+      font-size: 0.76rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cond-item-folder {
+      font-size: 0.7rem;
+      color: var(--text-lt);
+      margin-top: 2px;
+    }
+
+    .cond-main {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .cond-viewer-empty {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 60px 24px;
+      text-align: center;
+      color: var(--text-lt);
+      font-style: italic;
+    }
+    .cond-viewer {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .cond-viewer-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .cond-viewer-header h3 {
+      font-family: Georgia, serif;
+      font-size: 0.9rem;
+      font-weight: normal;
+      color: var(--text);
+      word-break: break-all;
+    }
+    .cond-badges { display: flex; gap: 6px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .badge-high    { background: var(--badge-h-bg); color: var(--badge-h-fg); }
+    .badge-medium  { background: var(--badge-m-bg); color: var(--badge-m-fg); }
+    .badge-personal { background: var(--badge-p-bg); color: var(--badge-p-fg); }
+    .badge-folder  { background: var(--bg); color: var(--accent-dk); border: 1px solid var(--border); }
+
+    .cond-images {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+    }
+    .cond-img-col {
+      border-right: 1px solid var(--border-lt);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .cond-img-col:last-child { border-right: none; }
+    .cond-img-label {
+      font-size: 0.72rem;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .cond-img-col img {
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      cursor: zoom-in;
+      display: block;
+    }
+    .cond-img-missing {
+      width: 100%;
+      padding: 40px 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-lt);
+      font-size: 0.78rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+
+    /* Keywords */
+    .kw-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+    .kw-tag {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      color: var(--accent-dk);
+    }
+
+    /* ============================================================
+       PAGE: Analyses (existing)
+    ============================================================ */
+    .filter-bar {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .filter-bar label { font-size: 0.78rem; color: var(--text-mid); margin-right: 4px; }
+    .filter-bar select {
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface);
+      font-size: 0.8rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .filter-bar select:focus { outline: 1px solid var(--accent); }
+
+    .analyses-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      min-width: 0;
+    }
+    .analysis-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 14px;
+      cursor: pointer;
+      transition: box-shadow 0.15s;
+    }
+    .analysis-card:hover { box-shadow: 0 2px 10px rgba(139,105,20,0.14); }
+    .card-filename {
+      font-size: 0.78rem;
+      color: var(--text-mid);
+      margin-bottom: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .card-meta { font-size: 0.76rem; color: var(--accent-dk); }
+    .roman-count { font-size: 0.76rem; color: var(--accent); font-weight: 600; }
+    .no-results {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 40px;
+      color: var(--text-lt);
+      font-style: italic;
+    }
+
+    /* ============================================================
+       PAGE: About
+    ============================================================ */
+    .about-layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 32px;
+      align-items: start;
+    }
+    .about-body h2 {
+      font-family: Georgia, serif;
+      font-size: 1.05rem;
+      font-weight: normal;
+      color: var(--accent-dk);
+      margin: 28px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .about-body h2:first-child { margin-top: 0; }
+    .about-body p {
+      font-size: 0.85rem;
+      color: var(--text);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+    .about-body ul {
+      list-style: none;
+      margin-bottom: 12px;
+      padding-left: 0;
+    }
+    .about-body ul li {
+      font-size: 0.83rem;
+      color: var(--text);
+      padding: 4px 0 4px 16px;
+      border-bottom: 1px solid var(--border-lt);
+      position: relative;
+    }
+    .about-body ul li::before {
+      content: "·";
+      position: absolute;
+      left: 4px;
+      color: var(--accent);
+    }
+    .about-body .step-list { counter-reset: step; list-style: none; padding-left: 0; }
+    .about-body .step-list li {
+      counter-increment: step;
+      padding: 6px 0 6px 36px;
+      border-bottom: 1px solid var(--border-lt);
+      position: relative;
+      font-size: 0.83rem;
+    }
+    .about-body .step-list li::before {
+      content: counter(step);
+      position: absolute;
+      left: 4px;
+      top: 6px;
+      width: 22px;
+      height: 22px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-family: Georgia, serif;
+    }
+    .about-sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .about-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 16px;
+    }
+    .about-card h3 {
+      font-family: Georgia, serif;
+      font-size: 0.82rem;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-lt);
+    }
+    .model-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.76rem;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border-lt);
+      gap: 8px;
+    }
+    .model-name { color: var(--text); font-weight: 500; }
+    .model-use  { color: var(--text-lt); text-align: right; }
+    .fact-item {
+      font-size: 0.78rem;
+      color: var(--text);
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border-lt);
+      display: flex;
+      gap: 8px;
+    }
+    .fact-item .fact-icon { color: var(--accent); flex-shrink: 0; }
+
+    /* ============================================================
+       Modal (analyses detail)
+    ============================================================ */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(44,36,22,0.6);
+      z-index: 100;
+      overflow-y: auto;
+      padding: 32px 16px;
+    }
+    .modal-backdrop.open { display: flex; align-items: flex-start; justify-content: center; }
+    .modal {
+      background: var(--surface);
+      border-radius: 4px;
+      width: 100%;
+      max-width: 1020px;
+      position: relative;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-header h2 {
+      font-family: Georgia, serif;
+      font-size: 1rem;
+      font-weight: normal;
+      color: var(--text);
+      word-break: break-all;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--text-mid);
+      cursor: pointer;
+      line-height: 1;
+      padding: 0 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+    .modal-col { padding: 16px; border-right: 1px solid var(--border-lt); }
+    .modal-col:last-child { border-right: none; }
+    .modal-col h3 {
+      font-family: Georgia, serif;
+      font-size: 0.8rem;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--border-lt);
+      padding-bottom: 6px;
+    }
+    .modal-col img {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      display: block;
+      cursor: zoom-in;
+    }
+    .img-missing {
+      width: 100%;
+      height: 160px;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-lt);
+      font-size: 0.78rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      padding: 4px 0;
+      border-bottom: 1px solid #f5f2eb;
+      gap: 8px;
+    }
+    .detail-label { color: var(--text-mid); flex-shrink: 0; }
+    .detail-value { color: var(--text); text-align: right; font-weight: 500; word-break: break-word; }
+    .elements-list { list-style: none; margin-top: 8px; }
+    .elements-list li {
+      font-size: 0.76rem;
+      padding: 4px 0;
+      border-bottom: 1px solid #f5f2eb;
+    }
+    .elem-name { font-weight: 600; }
+    .elem-meta { color: var(--text-mid); font-size: 0.72rem; }
+    .citations-list { list-style: none; margin-top: 8px; }
+    .citations-list li {
+      font-size: 0.72rem;
+      padding: 3px 0;
+      border-bottom: 1px solid #f5f2eb;
+      color: var(--accent-dk);
+    }
+    .sdxl-prompt {
+      margin-top: 10px;
+      font-size: 0.73rem;
+      color: var(--text-mid);
+      background: var(--bg);
+      border: 1px solid var(--border-lt);
+      border-radius: 3px;
+      padding: 8px;
+      font-style: italic;
+      word-break: break-word;
+    }
+
+    /* ============================================================
+       Lightbox
+    ============================================================ */
+    .lightbox-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.88);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 24px;
+    }
+    .lightbox-backdrop.open { display: flex; }
+    .lightbox-backdrop img {
+      max-width: 92%;
+      max-height: 72vh;
+      object-fit: contain;
+      border-radius: 3px;
+    }
+    .lightbox-info {
+      color: #d4c4a0;
+      margin-top: 16px;
+      max-width: 760px;
+      text-align: center;
+      font-size: 0.82rem;
+    }
+    .lightbox-info strong {
+      display: block;
+      font-family: Georgia, serif;
+      font-size: 1rem;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 2rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    /* ============================================================
+       Utilities
+    ============================================================ */
+    .loading {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-lt);
+      font-style: italic;
+    }
+    .error-msg {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 3px;
+      padding: 10px 14px;
+      color: #856404;
+      font-size: 0.82rem;
+      margin-bottom: 16px;
+    }
+
+    /* ============================================================
+       Responsive
+    ============================================================ */
+    @media (max-width: 1000px) {
+      .cond-layout { grid-template-columns: 1fr; }
+      .cond-sidebar { position: static; max-height: 280px; }
+      .cond-images { grid-template-columns: 1fr 1fr; }
+      .about-layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 860px) {
+      .analyses-grid { grid-template-columns: repeat(2, 1fr); }
+      .modal-body { grid-template-columns: 1fr; }
+      .modal-col { border-right: none; border-bottom: 1px solid var(--border-lt); }
+      .hero-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      header { flex-direction: column; gap: 4px; }
+      main { padding: 16px 16px 60px; }
+      .analyses-grid { grid-template-columns: 1fr; }
+      .cond-images { grid-template-columns: 1fr; }
+      nav { padding: 0 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======== Header ======== -->
+<header>
+  <h1>Templum Divi Augusti &middot; Ankara &middot; 25 BCE</h1>
+  <span class="subtitle">Citation-Grounded Reconstruction</span>
+</header>
+
+<!-- ======== Nav ======== -->
+<nav>
+  <div class="nav-tabs">
+    <button class="nav-btn active" onclick="switchPage('reconstructions', this)">Reconstructions</button>
+    <button class="nav-btn" onclick="switchPage('analyses', this)">Analyses</button>
+    <button class="nav-btn" onclick="switchPage('conditioning', this)">Canny &amp; Depth</button>
+    <button class="nav-btn" onclick="switchPage('about', this)">About</button>
+  </div>
+</nav>
+
+<!-- ======== Lightbox ======== -->
+<div class="lightbox-backdrop" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+  <img id="lightbox-img" src="" alt="" />
+  <div class="lightbox-info" id="lightbox-info"></div>
+</div>
+
+<!-- ======== Analyses Modal ======== -->
+<div class="modal-backdrop" id="modal-backdrop" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-col">
+        <h3>Source Photo</h3>
+        <div id="modal-source-img"></div>
+      </div>
+      <div class="modal-col">
+        <h3>Canny Map</h3>
+        <div id="modal-canny-img"></div>
+      </div>
+      <div class="modal-col">
+        <h3>Analysis Details</h3>
+        <div id="modal-details"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======== Main ======== -->
+<main>
+
+  <!-- ===== PAGE: Reconstructions ===== -->
+  <div id="page-reconstructions" class="page active">
+    <h2 class="section-title">Canonical Views</h2>
+    <div id="hero-grid" class="hero-grid">
+      <div class="loading">Loading reconstructions…</div>
+    </div>
+
+    <div class="prov-panel">
+      <div class="prov-tabs">
+        <button class="prov-tab-btn active" onclick="switchProvTab('citations', this)">Citations</button>
+        <button class="prov-tab-btn" onclick="switchProvTab('brief', this)">Aggregated Brief</button>
+      </div>
+      <div id="prov-citations" class="prov-tab-panel active">
+        <div id="citations-content" class="loading">Loading citations…</div>
+      </div>
+      <div id="prov-brief" class="prov-tab-panel">
+        <div id="brief-content" class="loading">Loading brief…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PAGE: Analyses ===== -->
+  <div id="page-analyses" class="page">
+    <h2 class="section-title">Image Analysis Browser</h2>
+    <div class="filter-bar">
+      <div>
+        <label for="filter-folder">Folder</label>
+        <select id="filter-folder" onchange="applyFilters()">
+          <option value="">All</option>
+          <option value="full_shots">full_shots</option>
+          <option value="architectural_models">architectural_models</option>
+          <option value="parallels">parallels</option>
+          <option value="details">details</option>
+          <option value="inscriptions">inscriptions</option>
+          <option value="plans">plans</option>
+        </select>
+      </div>
+    </div>
+    <div id="analyses-grid" class="analyses-grid">
+      <div class="loading">Loading analyses…</div>
+    </div>
+  </div>
+
+  <!-- ===== PAGE: Canny & Depth ===== -->
+  <div id="page-conditioning" class="page">
+    <h2 class="section-title">Conditioning Images — Source · Canny Edge · Depth Map</h2>
+    <div class="cond-layout">
+      <div class="cond-sidebar">
+        <div class="cond-sidebar-header">
+          <input class="cond-search" id="cond-search" type="text" placeholder="Search filename…" oninput="filterCondList()" />
+          <select class="cond-filter-select" id="cond-folder-filter" onchange="filterCondList()">
+            <option value="">All folders</option>
+            <option value="full_shots">full_shots</option>
+            <option value="architectural_models">architectural_models</option>
+            <option value="parallels">parallels</option>
+            <option value="details">details</option>
+            <option value="inscriptions">inscriptions</option>
+            <option value="plans">plans</option>
+          </select>
+        </div>
+        <div class="cond-list" id="cond-list">
+          <div class="loading">Loading…</div>
+        </div>
+      </div>
+
+      <div class="cond-main" id="cond-main">
+        <div class="cond-viewer-empty">Select an image from the list to compare source, canny edge map, and depth map.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PAGE: About ===== -->
+  <div id="page-about" class="page">
+    <h2 class="section-title">About this Project</h2>
+    <div class="about-layout">
+      <div class="about-body">
+
+        <h2>Overview</h2>
+        <p>
+          SARS (Scholarly Architectural Reconstruction System) reconstructs the first-century BCE appearance of the
+          <strong>Templum Divi Augusti</strong> in Ankara — a Corinthian peripteral temple dedicated to Augustus,
+          partially preserved inside the Hacı Bayram Veli Mosque (1427 CE). The pipeline combines academic document
+          retrieval, vision-language model analysis of 62 photographs and architectural models, and controlled
+          image generation.
+        </p>
+
+        <h2>Pipeline</h2>
+        <ol class="step-list">
+          <li><strong>Ingestion</strong> — 18 academic PDFs (primary, comparative, theory, local) are chunked with
+            semantic boundary detection and stored in a ChromaDB vector store using sentence-transformers embeddings.</li>
+          <li><strong>Conditioning Prep</strong> — All 62 source images receive Canny edge extraction (OpenCV) and
+            MiDaS depth estimation (Intel/dpt-large) to produce control signals for diffusion. Metadata is parsed
+            from standardised filenames and written to a conditioning registry.</li>
+          <li><strong>VLM Analysis</strong> — Each image is analysed with Gemma-3-4b-it. High-credibility sources
+            undergo a two-pass strategy: a first pass generates a precise RAG query; a second pass re-analyzes with
+            retrieved citation context. The output schema captures architectural elements, stratigraphic confidence,
+            mosque-interference level, and an SDXL prompt component per image.</li>
+          <li><strong>Aggregation</strong> — Confirmed Roman elements are counted across all 62 analyses. Elements
+            appearing in ≥2 independent sources or with high VLM confidence are promoted to the canonical prompt.
+            Ottoman and mosque terms are stripped from every prompt component.</li>
+          <li><strong>Generation</strong> — SDXL base + ControlNet (canny) generates 1024×1024 reconstructions.
+            Four canonical views are produced: front elevation, three-quarter, side elevation, and interior cella.
+            Prompts are capped at 70 words to stay within CLIP's token window. All output is accompanied by a
+            provenance JSON recording sources, citations, and generation parameters.</li>
+        </ol>
+
+        <h2>Contamination Control</h2>
+        <p>
+          The mosque presents a significant contamination challenge: its 1427 CE fabric is physically integrated
+          with Roman masonry. Three strategies are applied:
+        </p>
+        <ul>
+          <li>Ottoman vocabulary is stripped from all VLM-extracted SDXL prompt components before generation.</li>
+          <li>Canny maps from minaret photos have their top 25% zeroed; mosque-adjacent shots lose their left 20%.</li>
+          <li>Parallel temples — Maison Carrée (Nîmes) and Temple of Augustus (Pula) — provide uncontaminated
+            Corinthian geometry as additional conditioning sources.</li>
+        </ul>
+
+        <h2>Data Sources</h2>
+        <ul>
+          <li><strong>Primary:</strong> 8 site-specific publications including Mitchell &amp; Waelkens 1998 (DAI measured drawings), Hänlein-Schäfer 1985, Coulton 1976</li>
+          <li><strong>Comparative:</strong> Parallel temple studies (Maison Carrée, Pula, Nîmes)</li>
+          <li><strong>Theory:</strong> Vitruvius, Books III &amp; IV (<em>De Architectura</em>)</li>
+          <li><strong>Local:</strong> Ankara urban context and Ottoman period documentation</li>
+          <li><strong>Visual:</strong> 71 images — full shots, architectural models, details, inscriptions, parallels, plans</li>
+        </ul>
+
+      </div>
+
+      <div class="about-sidebar">
+        <div class="about-card">
+          <h3>Models Used</h3>
+          <div class="model-row"><span class="model-name">Gemma-3-4b-it</span><span class="model-use">VLM analysis</span></div>
+          <div class="model-row"><span class="model-name">all-MiniLM-L6-v2</span><span class="model-use">RAG embeddings</span></div>
+          <div class="model-row"><span class="model-name">SDXL Base 1.0</span><span class="model-use">Image generation</span></div>
+          <div class="model-row"><span class="model-name">ControlNet (canny)</span><span class="model-use">Edge conditioning</span></div>
+          <div class="model-row"><span class="model-name">sdxl-vae-fp16-fix</span><span class="model-use">FP16-stable VAE</span></div>
+          <div class="model-row"><span class="model-name">Intel/dpt-large</span><span class="model-use">Depth estimation</span></div>
+        </div>
+
+        <div class="about-card">
+          <h3>Key Numbers</h3>
+          <div class="fact-item"><span class="fact-icon">◆</span>62 source images analysed</div>
+          <div class="fact-item"><span class="fact-icon">◆</span>18 academic PDFs ingested</div>
+          <div class="fact-item"><span class="fact-icon">◆</span>4 canonical views generated</div>
+          <div class="fact-item"><span class="fact-icon">◆</span>71 conditioning maps (canny + depth)</div>
+          <div class="fact-item"><span class="fact-icon">◆</span>70-word CLIP token limit enforced</div>
+          <div class="fact-item"><span class="fact-icon">◆</span>2-pass VLM for high-credibility sources</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // =========================================================
+  // State
+  // =========================================================
+  let allAnalyses = [];
+  let allConditioningData = [];
+  let allReconstructionData = [];
+  let briefData = null;
+  let briefLoading = false;
+  let briefRequested = false;
+
+  const CANONICAL_TITLES = {
+    front_elevation: "Front Elevation",
+    three_quarter: "Three-Quarter View",
+    side_elevation: "Side Elevation",
+    interior_cella: "Interior — Cella",
+  };
+
+  // =========================================================
+  // Bootstrap
+  // =========================================================
+  window.addEventListener("DOMContentLoaded", () => {
+    Promise.all([
+      fetch("/api/reconstructions").then(r => r.json()),
+      fetch("/api/analyses").then(r => r.json()),
+      fetch("/api/conditioning").then(r => r.json()),
+    ]).then(([reconstructions, analyses, conditioning]) => {
+      allReconstructionData = reconstructions;
+      allAnalyses = analyses;
+      allConditioningData = conditioning;
+
+      renderHero(reconstructions);
+      renderAnalyses(analyses);
+      renderCondList(conditioning);
+    }).catch(err => {
+      document.getElementById("hero-grid").innerHTML =
+        `<div class="error-msg">Failed to load data: ${escHtml(err.message)}</div>`;
+    });
+
+    // Lazy-load brief/citations when Reconstructions page is first shown
+    loadBrief();
+  });
+
+  // =========================================================
+  // Page navigation
+  // =========================================================
+  function switchPage(name, btn) {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("page-" + name).classList.add("active");
+    btn.classList.add("active");
+  }
+
+  // =========================================================
+  // Provenance sub-tabs (on Reconstructions page)
+  // =========================================================
+  function switchProvTab(name, btn) {
+    document.querySelectorAll(".prov-tab-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".prov-tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("prov-" + name).classList.add("active");
+    btn.classList.add("active");
+  }
+
+  // =========================================================
+  // Brief / Citations
+  // =========================================================
+  function loadBrief() {
+    if (briefData || briefLoading) return;
+    briefLoading = true;
+
+    fetch("/api/brief").then(r => r.json()).then(data => {
+      briefData = data;
+      briefLoading = false;
+      renderCitations(data);
+      renderBrief(data);
+    }).catch(err => {
+      briefLoading = false;
+      const msg = `<div class="error-msg">Brief unavailable: ${escHtml(err.message)}</div>`;
+      document.getElementById("citations-content").innerHTML = msg;
+      document.getElementById("brief-content").innerHTML = msg;
+    });
+  }
+
+  // =========================================================
+  // Hero — Canonical Reconstructions
+  // =========================================================
+  function renderHero(reconstructions) {
+    const grid = document.getElementById("hero-grid");
+
+    if (!reconstructions || reconstructions.length === 0) {
+      grid.innerHTML = `<div class="hero-empty">
+        <div>No reconstructions found.</div>
+        <div style="font-size:0.8rem;margin-top:6px">Run <code>colab_sdxl.ipynb</code> to generate canonical views.</div>
+      </div>`;
+      return;
+    }
+
+    const canonicalOrder = ["front_elevation", "three_quarter", "side_elevation", "interior_cella"];
+    const byName = {};
+    for (const r of reconstructions) {
+      for (const key of canonicalOrder) {
+        if (r.filename.startsWith(key + "_")) {
+          if (!byName[key] || r.filename > byName[key].filename) byName[key] = r;
+        }
+      }
+    }
+
+    const matched = new Set();
+    const slots = canonicalOrder.map(key => {
+      if (byName[key]) { matched.add(byName[key].filename); return { key, rec: byName[key] }; }
+      return { key, rec: null };
+    });
+
+    const remaining = reconstructions.filter(r => !matched.has(r.filename));
+    let ri = 0;
+    for (const slot of slots) {
+      if (!slot.rec && ri < remaining.length) slot.rec = remaining[ri++];
+    }
+
+    grid.innerHTML = slots.map(({ key, rec }) => {
+      const title = CANONICAL_TITLES[key] || key;
+      if (!rec) {
+        return `<div class="hero-card" style="cursor:default">
+          <div class="hero-card-placeholder">
+            <div class="ph-icon">⬜</div>
+            <div>No image generated yet</div>
+          </div>
+          <div class="hero-card-footer"><span class="hero-card-title">${escHtml(title)}</span></div>
+        </div>`;
+      }
+      const provTitle = rec.provenance ? (rec.provenance.title || title) : title;
+      const sourceLabel = rec.provenance && rec.provenance.source_image
+        ? rec.provenance.source_image.replace(/^.*[\\/]/, "")
+        : "";
+      return `<div class="hero-card" onclick="openLightbox('${escHtml(rec.url)}', ${JSON.stringify(escHtml(provTitle))}, ${JSON.stringify(rec.provenance)})">
+        <img src="${escHtml(rec.url)}" alt="${escHtml(provTitle)}" loading="lazy" />
+        <div class="hero-card-footer">
+          <span class="hero-card-title">${escHtml(provTitle)}</span>
+          <span class="hero-card-meta">${escHtml(sourceLabel)}</span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  // =========================================================
+  // Citations
+  // =========================================================
+  function renderCitations(data) {
+    const div = document.getElementById("citations-content");
+    if (!data || data.error) {
+      div.innerHTML = `<div class="error-msg">${escHtml(data ? data.error : "Unknown error")}</div>`;
+      return;
+    }
+
+    const citations = data.all_citations || [];
+
+    let html = `<div class="brief-section"><ol class="citations-numbered">`;
+    if (citations.length === 0) {
+      html += `<li style="color:var(--text-lt);list-style:none">No citations found.</li>`;
+    } else {
+      citations.forEach(c => { html += `<li>${escHtml(c)}</li>`; });
+    }
+    html += `</ol></div>`;
+
+    div.innerHTML = html;
+  }
+
+  // =========================================================
+  // Brief
+  // =========================================================
+  function renderBrief(data) {
+    const div = document.getElementById("brief-content");
+    if (!data || data.error) {
+      div.innerHTML = `<div class="error-msg">${escHtml(data ? data.error : "Unknown error")}</div>`;
+      return;
+    }
+
+    const confirmed = data.confirmed_elements || [];
+    const inferred = data.inferred_elements || [];
+    const sourceCount = data.source_count || 0;
+
+    let html = `<div class="stat-row">
+      <div class="stat-box"><span class="stat-label">Sources Analysed</span><span class="stat-value">${sourceCount}</span></div>
+      <div class="stat-box"><span class="stat-label">Confirmed</span><span class="stat-value">${confirmed.length}</span></div>
+      <div class="stat-box"><span class="stat-label">Inferred</span><span class="stat-value">${inferred.length}</span></div>
+    </div>`;
+
+    html += `<div class="brief-section"><h4>Confirmed Elements</h4>`;
+    if (confirmed.length === 0) {
+      html += `<p style="color:var(--text-lt);font-size:0.82rem">No confirmed elements yet.</p>`;
+    } else {
+      html += `<ul class="brief-list">`;
+      confirmed.forEach(e => { html += `<li>${escHtml(e)}</li>`; });
+      html += `</ul>`;
+    }
+    html += `</div>`;
+
+    html += `<div class="brief-section"><h4>Inferred Elements</h4>`;
+    if (inferred.length === 0) {
+      html += `<p style="color:var(--text-lt);font-size:0.82rem">No inferred elements.</p>`;
+    } else {
+      html += `<div class="inferred-list">`;
+      inferred.forEach(e => { html += `<span class="inferred-tag">${escHtml(e)}</span>`; });
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    div.innerHTML = html;
+  }
+
+  // =========================================================
+  // Analyses grid
+  // =========================================================
+  function renderAnalyses(analyses) {
+    const grid = document.getElementById("analyses-grid");
+    if (!analyses || analyses.length === 0) {
+      grid.innerHTML = `<div class="no-results">No analyses found.</div>`;
+      return;
+    }
+
+    grid.innerHTML = analyses.map((a, i) => {
+      const tier = a.credibility_tier || "unknown";
+      const badgeCls = tier === "high" ? "badge-high" : tier === "medium" ? "badge-medium" : "badge-personal";
+      const romanCount = (a.architectural_elements || []).filter(e => e.period === "Roman").length;
+      const folder = a.source_folder || "";
+      const folderDisplay = folder.startsWith("parallels/") ? "parallels" : folder;
+
+      return `<div class="analysis-card" onclick="openModal(${i})">
+        <div class="card-filename" title="${escHtml(a.source_filename || "")}">${escHtml(a.source_filename || "—")}</div>
+        <div class="card-row">
+          <span class="badge ${badgeCls}">${escHtml(tier)}</span>
+          <span class="card-meta">${escHtml(a.mosque_interference || "—")}</span>
+        </div>
+        <div class="card-row">
+          <span class="card-meta">${escHtml(folderDisplay)}</span>
+          <span class="roman-count">Roman: ${romanCount}</span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function applyFilters() {
+    const folder = document.getElementById("filter-folder").value;
+
+    const filtered = allAnalyses.filter(a => {
+      const af = a.source_folder || "";
+      return !folder || af === folder || (folder === "parallels" && af.startsWith("parallels"));
+    });
+
+    renderAnalyses(filtered);
+    document.querySelectorAll(".analysis-card").forEach((card, i) => {
+      card.onclick = () => showModal(filtered[i]);
+    });
+  }
+
+  function openModal(idx) { showModal(allAnalyses[idx]); }
+
+  function showModal(a) {
+    if (!a) return;
+    document.getElementById("modal-title").textContent = a.source_filename || "Analysis";
+
+    const srcDiv = document.getElementById("modal-source-img");
+    srcDiv.innerHTML = a.source_relative_path
+      ? `<img src="/img/source/${encodeURIPath(a.source_relative_path)}" alt="source" loading="lazy" onclick="openLightbox(this.src,'${escHtml(a.source_filename||'')}',null)" />`
+      : `<div class="img-missing">No source image</div>`;
+
+    const canDiv = document.getElementById("modal-canny-img");
+    canDiv.innerHTML = a.canny_relative_path
+      ? `<img src="/img/canny/${encodeURIPath(a.canny_relative_path)}" alt="canny" loading="lazy" onclick="openLightbox(this.src,'Canny — ${escHtml(a.source_filename||'')}',null)" />`
+      : `<div class="img-missing">No canny map</div>`;
+
+    const detDiv = document.getElementById("modal-details");
+    const romanElements = (a.architectural_elements || []).filter(e => e.period === "Roman");
+    const strat = a.stratigraphic_confidence || {};
+
+    let html = "";
+    [
+      ["Mosque interference", a.mosque_interference],
+      ["Roman fabric quality", a.roman_fabric_quality],
+      ["Credibility tier", a.credibility_tier],
+      ["Source folder", a.source_folder],
+    ].forEach(([label, val]) => {
+      html += `<div class="detail-row"><span class="detail-label">${label}</span><span class="detail-value">${escHtml(val || "—")}</span></div>`;
+    });
+
+    if (Object.keys(strat).length) {
+      html += `<div class="detail-row" style="margin-top:8px"><span class="detail-label" style="font-weight:600;color:var(--accent)">Stratigraphic confidence</span><span></span></div>`;
+      for (const [k, v] of Object.entries(strat)) {
+        if (typeof v === "number") {
+          html += `<div class="detail-row">
+            <span class="detail-label">${escHtml(k)}</span>
+            <span class="detail-value">
+              <span class="confidence-bar" style="width:${Math.max(4, Math.round(v*80))}px"></span>${(v * 100).toFixed(0)}%
+            </span>
+          </div>`;
+        }
+      }
+    }
+
+    if (romanElements.length) {
+      html += `<div style="margin-top:10px;font-size:0.78rem;font-weight:600;color:var(--accent)">Roman Elements</div>`;
+      html += `<ul class="elements-list">` + romanElements.map(e => `
+        <li>
+          <span class="elem-name">${escHtml(e.element || "")}</span>
+          <span class="elem-meta"> · ${escHtml(e.condition || "")} · ${escHtml(e.confidence || "")}</span>
+        </li>`).join("") + `</ul>`;
+    }
+
+    const cits = a.retrieved_citations || [];
+    if (cits.length) {
+      html += `<div style="margin-top:10px;font-size:0.78rem;font-weight:600;color:var(--accent)">Citations</div>`;
+      html += `<ul class="citations-list">` + cits.map(c => `<li>${escHtml(c)}</li>`).join("") + `</ul>`;
+    }
+
+    if (a.sdxl_prompt_component) {
+      html += `<div style="margin-top:10px;font-size:0.78rem;font-weight:600;color:var(--accent)">SDXL Prompt Component</div>`;
+      html += `<div class="sdxl-prompt">${escHtml(a.sdxl_prompt_component)}</div>`;
+    }
+
+    detDiv.innerHTML = html;
+    document.getElementById("modal-backdrop").classList.add("open");
+  }
+
+  function closeModal(evt) {
+    if (evt && evt.target !== document.getElementById("modal-backdrop") && !evt.target.classList.contains("modal-close")) return;
+    document.getElementById("modal-backdrop").classList.remove("open");
+  }
+
+  // =========================================================
+  // Canny / Depth Viewer
+  // =========================================================
+  let condItems = [];
+
+  function renderCondList(data) {
+    condItems = data;
+    _renderCondItems(data);
+  }
+
+  function _renderCondItems(items) {
+    const list = document.getElementById("cond-list");
+    if (!items || items.length === 0) {
+      list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-lt);font-style:italic;font-size:0.8rem">No items found.</div>`;
+      return;
+    }
+    list.innerHTML = items.map((item, i) => `
+      <div class="cond-item" id="cond-item-${i}" onclick="selectCondItem(${i}, this)">
+        <div class="cond-item-name" title="${escHtml(item.filename)}">${escHtml(item.filename)}</div>
+        <div class="cond-item-folder">${escHtml(item.folder || "")}</div>
+      </div>`).join("");
+  }
+
+  function filterCondList() {
+    const q = (document.getElementById("cond-search").value || "").toLowerCase();
+    const folder = document.getElementById("cond-folder-filter").value;
+
+    const filtered = condItems.filter(item => {
+      const nameMatch = !q || item.filename.toLowerCase().includes(q);
+      const f = item.folder || "";
+      const folderMatch = !folder || f === folder || (folder === "parallels" && f.startsWith("parallels"));
+      return nameMatch && folderMatch;
+    });
+
+    _renderCondItems(filtered);
+    // Re-bind to filtered indices
+    document.querySelectorAll(".cond-item").forEach((el, i) => {
+      el.onclick = () => { selectCondItem(i, el, filtered); };
+    });
+  }
+
+  function selectCondItem(idx, el, list) {
+    const src = list || condItems;
+    const item = src[idx];
+    if (!item) return;
+
+    document.querySelectorAll(".cond-item").forEach(e => e.classList.remove("selected"));
+    el.classList.add("selected");
+
+    const main = document.getElementById("cond-main");
+
+    const tier = item.credibility_tier || "";
+    const tierBadge = tier ? `<span class="badge badge-${tier === "high" ? "high" : tier === "medium" ? "medium" : "personal"}">${escHtml(tier)}</span>` : "";
+    const folderBadge = item.folder ? `<span class="badge badge-folder">${escHtml(item.folder)}</span>` : "";
+
+    const keywords = (item.keywords || []);
+    const kwHtml = keywords.length
+      ? `<div class="kw-list">${keywords.map(k => `<span class="kw-tag">${escHtml(k)}</span>`).join("")}</div>`
+      : "";
+
+    function imgCol(label, url) {
+      if (url) {
+        return `<div class="cond-img-col">
+          <div class="cond-img-label">${label}</div>
+          <img src="${escHtml(url)}" alt="${label}" loading="lazy" onclick="openLightbox('${escHtml(url)}','${escHtml(label)} — ${escHtml(item.filename)}',null)" />
+        </div>`;
+      }
+      return `<div class="cond-img-col">
+        <div class="cond-img-label">${label}</div>
+        <div class="cond-img-missing">Not available</div>
+      </div>`;
+    }
+
+    main.innerHTML = `<div class="cond-viewer">
+      <div class="cond-viewer-header">
+        <h3>${escHtml(item.filename)}</h3>
+        <div class="cond-badges">${tierBadge}${folderBadge}</div>
+      </div>
+      ${kwHtml ? `<div style="padding:8px 18px;border-bottom:1px solid var(--border-lt)">${kwHtml}</div>` : ""}
+      <div class="cond-images">
+        ${imgCol("Source", item.source_url)}
+        ${imgCol("Canny Edge", item.canny_url)}
+        ${imgCol("Depth Map", item.depth_url)}
+      </div>
+    </div>`;
+  }
+
+  // =========================================================
+  // Lightbox
+  // =========================================================
+  function openLightbox(url, title, provenance) {
+    document.getElementById("lightbox-img").src = url;
+    let info = `<strong>${escHtml(title)}</strong>`;
+    if (provenance) {
+      if (provenance.source_image) info += `Source: ${escHtml(provenance.source_image)}<br>`;
+      if (provenance.aggregated_from) info += `Aggregated from ${escHtml(String(provenance.aggregated_from))}<br>`;
+      if (provenance.confirmed_elements && provenance.confirmed_elements.length) {
+        info += `Confirmed elements: ${provenance.confirmed_elements.slice(0, 3).map(escHtml).join(", ")}…`;
+      }
+      if (provenance.positive_prompt) {
+        info += `<br><em style="font-size:0.75em;opacity:0.8">${escHtml(provenance.positive_prompt.slice(0, 200))}…</em>`;
+      }
+    }
+    document.getElementById("lightbox-info").innerHTML = info;
+    document.getElementById("lightbox").classList.add("open");
+  }
+
+  function closeLightbox(evt) {
+    const lb = document.getElementById("lightbox");
+    if (!evt || evt.target === lb || evt.target.classList.contains("lightbox-close")) {
+      lb.classList.remove("open");
+    }
+  }
+
+  // =========================================================
+  // Helpers
+  // =========================================================
+  function escHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function encodeURIPath(path) {
+    return path.split("/").map(s => encodeURIComponent(s)).join("/");
+  }
+</script>
+</body>
+</html>
