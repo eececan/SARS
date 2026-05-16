@@ -1,4 +1,4 @@
-# SARS — Scholarly Architectural Reconstruction System
+# SARS — Scientific Architectural Reconstruction System
 ### Templum Divi Augusti, Ankara · 25 BCE
 
 A citation-grounded pipeline that reconstructs the first-century appearance of the Temple of Augustus in Ankara (Monumentum Ancyranum) using VLM structural analysis, RAG-retrieved academic constraints, and SDXL + ControlNet image generation.

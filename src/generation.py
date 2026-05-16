@@ -124,10 +124,12 @@ def load_sdxl_pipeline(
 # giving 12 columns total across the front.
 # 15 columns along each side (including corner columns).
 CONFIRMED_COLUMN_FACTS = (
-    "octastyle facade with 8 exterior columns across front, "
-    "4 additional columns in antis between facade and cella entrance, "
-    "12 columns total across front elevation, "
-    "15 columns per side flank"
+    "STRICT ARCHITECTURAL CONSTRAINTS: "
+    "octastyle facade with EXACTLY 8 exterior columns across front, "
+    "4 columns in antis (between exterior and cella), "
+    "12 columns TOTAL across front elevation, "
+    "15 columns per side flank (including corners), "
+    "peripteral layout with continuous colonnade all sides"
 )
 
 # ---------------------------------------------------------------------------
@@ -274,9 +276,12 @@ def build_negative_prompt(analysis: dict) -> str:
         "vegetation, cracks, graffiti, scaffolding, metal barriers, "
         "concrete repairs, steel framework, tourist infrastructure, "
         "modern buildings, power lines, cars, people, contemporary elements, "
-        "anachronistic details, fantasy architecture, incorrect proportions, "
-        "CGI artifacts, oversaturation, lens flare, HDR, 3D render look, "
-        "plastic appearance, low quality, blurry, deformed"
+        "anachronistic details, fantasy architecture, CGI artifacts, "
+        "oversaturation, lens flare, HDR, 3D render look, plastic appearance, "
+        "low quality, blurry, deformed, "
+        "WRONG COLUMN COUNTS, 6 columns, 7 columns, 9 columns, 10 columns, 11 columns, "
+        "disproportionate columns, columns too tall, columns too short, "
+        "uneven column spacing, asymmetrical layout, truncated structure"
     )
     mosque_addition = (
         ", Ottoman architecture, pointed arches, Islamic geometric ornament, "
@@ -631,6 +636,15 @@ def aggregate_all_analyses(analysis_dir: str) -> dict:
         if "error" in data or data.get("source_folder") == "plans":
             continue
 
+        # Exclude contaminated full_shots from aggregation (mosque interference present)
+        # Only use: parallels, models, or full_shots with mosque=none
+        folder = data.get("source_folder", "")
+        mosque = data.get("mosque_interference", "")
+        if folder == "full_shots" and mosque in ("partial", "dominant"):
+            continue  # Skip contaminated full_shots
+        if folder in ("details", "inscriptions"):
+            continue  # Skip detail crops (too specific)
+
         for elem in data.get("architectural_elements", []):
             if elem.get("period") == "Roman":
                 key = elem.get("element", "")
@@ -765,26 +779,26 @@ CANONICAL_VIEWS = [
     {
         "name": "front_elevation",
         "title": "Front Elevation",
-        "prefer_folder": "full_shots",
+        "prefer_folder": "parallels/maison_carree",
         "prefer_keywords": ["front"],
         "fallback_folder": "architectural_models",
-        "conditioning_scale": 0.75,
+        "conditioning_scale": 0.90,
     },
     {
         "name": "three_quarter",
         "title": "Three-Quarter View",
-        "prefer_folder": "full_shots",
-        "prefer_keywords": ["south_west", "north_east", "south_east", "north_west"],
+        "prefer_folder": "parallels/maison_carree",
+        "prefer_keywords": ["column"],
         "fallback_folder": "architectural_models",
-        "conditioning_scale": 0.70,
+        "conditioning_scale": 0.85,
     },
     {
         "name": "side_elevation",
         "title": "Side Elevation",
-        "prefer_folder": "full_shots",
-        "prefer_keywords": ["west", "east", "north", "south"],
-        "fallback_folder": "full_shots",
-        "conditioning_scale": 0.75,
+        "prefer_folder": "parallels/maison_carree",
+        "prefer_keywords": ["side", "column"],
+        "fallback_folder": "parallels/pula",
+        "conditioning_scale": 0.90,
     },
     {
         "name": "interior_cella",
@@ -792,7 +806,7 @@ CANONICAL_VIEWS = [
         "prefer_folder": "full_shots",
         "prefer_keywords": ["interior", "cella", "inside"],
         "fallback_folder": "full_shots",
-        "conditioning_scale": 0.70,
+        "conditioning_scale": 0.80,
     },
 ]
 

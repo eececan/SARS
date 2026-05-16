@@ -1,26 +1,5 @@
 """
 Retrieval Module for SARS
-
-This module handles vector storage, embedding, and MMR-based retrieval
-for the Templum Divi Augusti research project.
-
-Why sentence-transformers/all-MiniLM-L6-v2?
-- Lightweight (~80MB) model optimized for semantic similarity
-- Good balance of speed and quality for CPU inference
-- Well-suited for academic/technical text retrieval
-- No API keys required - runs entirely local
-
-Why ChromaDB?
-- Lightweight embedded vector store
-- Easy persistence to filesystem
-- Good integration with LangChain
-- No external service dependencies
-
-Why MMR (Maximum Marginal Relevance)?
-- Balances relevance with diversity in results
-- Prevents redundant results from same source
-- lambda_mult=0.7 weights relevance slightly higher than diversity
-- fetch_k=20 pools more candidates for better selection
 """
 
 import shutil
@@ -29,33 +8,20 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.ingestion import ingest_pdfs, CHROMA_DIR
 
-
-# Configuration constants
-COLLECTION_NAME = "augustus_temple"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-SEARCH_K = 5
-FETCH_K = 20
-LAMBDA_MULT = 0.7
+COLLECTION_NAME  = "augustus_temple"
+EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
+SEARCH_K         = 12   # was 5 — wider net catches more relevant passages
+FETCH_K          = 50   # was 20 — larger MMR candidate pool enables real diversity
+LAMBDA_MULT      = 0.65 # slightly more diversity weight than before (was 0.7)
 
 
 def get_embedding_model() -> HuggingFaceEmbeddings:
-    """
-    Initialize and return the embedding model.
-
-    Why separate this function?
-    - Lazy loading delays model download until needed
-    - Enables reuse across multiple operations
-    - Single point for model configuration
-
-    Returns:
-        Configured HuggingFaceEmbeddings instance
-    """
     return HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,
         model_kwargs={"device": "cpu"},
@@ -64,37 +30,20 @@ def get_embedding_model() -> HuggingFaceEmbeddings:
 
 
 def build(persist: bool = True) -> Chroma:
-    """
-    Build or rebuild the vector store from all PDFs under data/papers/.
-
-    Why call ingest_pdfs() once and reuse its chunks?
-    - Avoids double-reading every PDF (the old code read files twice)
-    - ingest_pdfs() now returns the chunk list alongside statistics
-
-    Why wipe chroma_db before rebuilding?
-    - Prevents stale embeddings from a previous run mixing with new ones
-    - ChromaDB does not deduplicate on its own
-
-    Args:
-        persist: Whether to persist the vector store to disk (pass False for tests)
-
-    Returns:
-        Chroma vector store instance, ready to query
-    """
     print("Building vector store...")
 
     result = ingest_pdfs()
 
+    embeddings = get_embedding_model()
+
     if result["n_chunks"] == 0:
         print("No chunks to index. Add PDFs to data/papers/<category>/ first.")
-        embeddings = get_embedding_model()
         return Chroma(
             collection_name=COLLECTION_NAME,
             embedding_function=embeddings,
             persist_directory=str(CHROMA_DIR) if persist else None,
         )
 
-    # Convert chunks to LangChain Document objects
     langchain_docs = [
         Document(
             page_content=chunk["content"],
@@ -103,25 +52,29 @@ def build(persist: bool = True) -> Chroma:
         for chunk in result["chunks"]
     ]
 
-    embeddings = get_embedding_model()
-
-    # Wipe existing store to avoid duplicate embeddings on rebuild
     chroma_path = CHROMA_DIR
     if chroma_path.exists():
         shutil.rmtree(chroma_path)
     chroma_path.mkdir(parents=True, exist_ok=True)
 
-    persist_dir = str(chroma_path) if persist else None
-
     vectorstore = Chroma.from_documents(
         documents=langchain_docs,
         embedding=embeddings,
         collection_name=COLLECTION_NAME,
-        persist_directory=persist_dir,
+        persist_directory=str(chroma_path) if persist else None,
     )
 
-    print(f"Vector store built with {len(langchain_docs)} chunks")
+    print(f"Vector store built: {len(langchain_docs)} chunks indexed")
     return vectorstore
+
+
+def _load_vectorstore() -> Chroma:
+    embeddings = get_embedding_model()
+    return Chroma(
+        collection_name=COLLECTION_NAME,
+        embedding_function=embeddings,
+        persist_directory=str(CHROMA_DIR),
+    )
 
 
 def query(
@@ -130,68 +83,57 @@ def query(
     k: int = SEARCH_K,
 ) -> List[Dict[str, Any]]:
     """
-    Search the vector store using MMR (Maximum Marginal Relevance).
+    MMR search returning up to k results with real similarity scores.
 
-    Why MMR over plain similarity search?
-    - Returns more diverse results
-    - Avoids multiple chunks from the same source dominating the list
-    - Better for exploratory research where variety matters
-
-    Why return a custom dict format?
-    - Standardises output for the evaluation module
-    - Includes all fields needed for citation (source, page, category, priority)
-    - Flat structure is easier to work with than nested LangChain objects
-
-    Args:
-        query_text: The search query string
-        vectorstore: Optional Chroma instance; loads from disk if None
-        k: Number of results to return
-
-    Returns:
-        List of result dicts with keys:
-        - content: The retrieved text chunk
-        - source: Source filename
-        - page: Chunk index (proxy for page position)
-        - category: Relevance category (primary / local / comparative / theory)
-        - priority: Integer priority (1 = most relevant category)
-        - citation: Formatted citation string
-        - relevance_score: Approximate positional score (1.0 → 0.5)
+    Scores come from a separate similarity_search_with_relevance_scores call
+    so they reflect actual semantic distance, not just rank position.
     """
     if vectorstore is None:
-        embeddings = get_embedding_model()
-        vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
-            embedding_function=embeddings,
-            persist_directory=str(CHROMA_DIR),
-        )
+        vectorstore = _load_vectorstore()
 
-    results = vectorstore.max_marginal_relevance_search(
+    # MMR for the returned set (diversity-aware)
+    mmr_docs = vectorstore.max_marginal_relevance_search(
         query_text,
         k=k,
         fetch_k=FETCH_K,
         lambda_mult=LAMBDA_MULT,
     )
 
-    formatted_results = []
-    for i, doc in enumerate(results):
+    # Real similarity scores for the same query (to attach to results)
+    scored = vectorstore.similarity_search_with_relevance_scores(
+        query_text, k=k * 2
+    )
+    score_map: Dict[str, float] = {}
+    for doc, score in scored:
+        key = doc.page_content[:80]
+        score_map[key] = round(float(score), 4)
+
+    results = []
+    for doc in mmr_docs:
         meta = doc.metadata
-        source = meta.get("source", "unknown")
-        page = meta.get("chunk_index", "N/A")
+        source   = meta.get("source", "unknown")
+        chunk_idx = meta.get("chunk_index", "N/A")
         category = meta.get("category", "unknown")
         priority = meta.get("priority", 99)
+        sim_score = score_map.get(doc.page_content[:80], None)
 
-        formatted_results.append({
-            "content": doc.page_content,
-            "source": source,
-            "page": page,
-            "category": category,
-            "priority": priority,
-            "citation": f"{source} [{category}], chunk {page}",
-            # Positional approximation: rank 1 = 1.0, rank k = ~0.5
-            "relevance_score": round(1.0 - (i / (2 * k)), 3),
+        results.append({
+            "content":         doc.page_content,
+            "source":          source,
+            "page":            chunk_idx,
+            "category":        category,
+            "priority":        priority,
+            "citation":        f"{source} [{category}], chunk {chunk_idx}",
+            "relevance_score": sim_score,
         })
 
-    return formatted_results
+    # Sort by priority category first, then by score descending
+    results.sort(key=lambda r: (
+        r["priority"],
+        -(r["relevance_score"] or 0),
+    ))
+
+    return results
 
 
 if __name__ == "__main__":
@@ -202,6 +144,7 @@ if __name__ == "__main__":
     results = query("Corinthian column proportions Vitruvius", vectorstore=vs)
 
     for i, r in enumerate(results, 1):
-        print(f"\n--- Result {i} [{r['category']}] ---")
-        print(f"Source: {r['source']}")
+        score_str = f"{r['relevance_score']:.4f}" if r["relevance_score"] is not None else "n/a"
+        print(f"\n--- Result {i} [{r['category']}] score={score_str} ---")
+        print(f"Source : {r['source']}")
         print(f"Content: {r['content'][:200]}...")
