@@ -24,6 +24,7 @@ VISUAL_SOURCES_DIR = BASE_DIR / "data" / "visual_sources"
 CANNY_DIR = BASE_DIR / "data" / "conditioning" / "canny"
 DEPTH_DIR = BASE_DIR / "data" / "conditioning" / "depth"
 REGISTRY_PATH = BASE_DIR / "data" / "conditioning" / "registry" / "conditioning_registry.json"
+EXAMPLE_IMG_DIR = Path(__file__).parent / "images"
 
 app = Flask(__name__)
 
@@ -185,6 +186,14 @@ def img_canny(filepath: str):
 @app.route("/img/depth/<path:filepath>")
 def img_depth(filepath: str):
     path = DEPTH_DIR / filepath
+    if not path.exists():
+        return "Not found", 404
+    return send_file(path)
+
+
+@app.route("/img/example/<filename>")
+def img_example(filename: str):
+    path = EXAMPLE_IMG_DIR / filename
     if not path.exists():
         return "Not found", 404
     return send_file(path)

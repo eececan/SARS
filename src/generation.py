@@ -529,13 +529,26 @@ def run_batch_generation(
     recon_dir = output_dir / "reconstructions"
     recon_dir.mkdir(parents=True, exist_ok=True)
 
+    # Skip folders that produce close-up canny maps (no full structure visible)
+    SKIP_FOLDERS = {"details", "inscriptions"}
+    # Skip filenames that indicate close-up shots (column-only, capital-only)
+    SKIP_KEYWORDS = ("columncapital", "lion", "relief", "_columns.")
+
     analyses = []
     for f in sorted(Path(analysis_dir).glob("*_analysis.json")):
         data = json.loads(f.read_text(encoding="utf-8"))
-        if "error" not in data and data.get("sdxl_prompt_component"):
-            analyses.append(data)
+        if "error" in data or not data.get("sdxl_prompt_component"):
+            continue
+        folder = data.get("source_folder", "")
+        fname = data.get("source_filename", "").lower()
+        if folder in SKIP_FOLDERS:
+            continue
+        if any(kw in fname for kw in SKIP_KEYWORDS):
+            continue
+        analyses.append(data)
 
     analyses.sort(key=_score_analysis, reverse=True)
+    print(f"Filtered to {len(analyses)} full-structure sources (excluded details/inscriptions/close-ups)")
 
     if resume and recon_dir.exists():
         done = {
@@ -564,10 +577,10 @@ def run_batch_generation(
         filename = analysis["source_filename"]
         folder = analysis.get("source_folder", "")
         is_plan = folder == "plans"
-        # Higher scale = stronger adherence to source canny geometry.
-        # Plans need near-perfect adherence; other shots need strong adherence
-        # so SDXL reconstructs ON the input rather than hallucinating layout.
-        conditioning_scale = 1.1 if is_plan else 1.0
+        # ControlNet scale: high values cause SDXL to merely fill in source edges
+        # (e.g. column close-ups → just columns). Moderate scale lets prompt
+        # drive temple reconstruction while keeping general structure from source.
+        conditioning_scale = 1.0 if is_plan else 0.55
 
         print(f"[{i+1}/{total}] {filename}")
         print(f"  folder: {folder} | scale: {conditioning_scale}"
@@ -787,23 +800,23 @@ CANONICAL_VIEWS = [
         "prefer_folder": "parallels/maison_carree",
         "prefer_keywords": ["front"],
         "fallback_folder": "architectural_models",
-        "conditioning_scale": 0.90,
+        "conditioning_scale": 0.55,
     },
     {
         "name": "three_quarter",
         "title": "Three-Quarter View",
-        "prefer_folder": "parallels/maison_carree",
-        "prefer_keywords": ["column"],
-        "fallback_folder": "architectural_models",
-        "conditioning_scale": 0.85,
+        "prefer_folder": "architectural_models",
+        "prefer_keywords": ["drawing", "model"],
+        "fallback_folder": "parallels/pula",
+        "conditioning_scale": 0.55,
     },
     {
         "name": "side_elevation",
         "title": "Side Elevation",
         "prefer_folder": "parallels/maison_carree",
-        "prefer_keywords": ["side", "column"],
+        "prefer_keywords": ["side"],
         "fallback_folder": "parallels/pula",
-        "conditioning_scale": 0.90,
+        "conditioning_scale": 0.55,
     },
     {
         "name": "interior_cella",
@@ -811,7 +824,7 @@ CANONICAL_VIEWS = [
         "prefer_folder": "full_shots",
         "prefer_keywords": ["interior", "cella", "inside"],
         "fallback_folder": "full_shots",
-        "conditioning_scale": 0.80,
+        "conditioning_scale": 0.50,
     },
 ]
 

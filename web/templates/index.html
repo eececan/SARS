@@ -168,6 +168,86 @@
       border-radius: 4px;
     }
 
+    /* ---- Pipeline showcase (idai1 example) ---- */
+    .showcase {
+      margin-bottom: 48px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .showcase-header {
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .showcase-title {
+      font-family: Georgia, serif;
+      font-size: 1.15rem;
+      color: var(--text);
+      margin: 0 0 4px 0;
+    }
+    .showcase-sub {
+      font-size: 0.82rem;
+      color: var(--text-lt);
+      font-style: italic;
+    }
+    .showcase-hero {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .showcase-hero img {
+      width: 100%;
+      height: auto;
+      max-height: 420px;
+      object-fit: cover;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .showcase-hero-label {
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-lt);
+      margin-top: 6px;
+      font-style: italic;
+    }
+    .showcase-pipeline {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .showcase-step {
+      text-align: center;
+    }
+    .showcase-step img {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      display: block;
+    }
+    .showcase-step-label {
+      font-size: 0.78rem;
+      color: var(--text-lt);
+      margin-top: 8px;
+      font-style: italic;
+    }
+    .showcase-step-num {
+      display: inline-block;
+      background: var(--accent);
+      color: white;
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      border-radius: 10px;
+      margin-right: 6px;
+      font-style: normal;
+      font-weight: 600;
+    }
+
     /* Provenance panel below hero */
     .prov-panel {
       background: var(--surface);
@@ -887,6 +967,51 @@
 
   <!-- ===== PAGE: Reconstructions ===== -->
   <div id="page-reconstructions" class="page active">
+
+    <!-- Showcase: idai1 worked example -->
+    <div class="showcase">
+      <div class="showcase-header">
+        <h2 class="showcase-title">Worked Example — Source Photo idai1</h2>
+        <p class="showcase-sub">
+          A single photograph from the DAI archive carried through the full pipeline.
+          The original shot is dominated by the Hacı Bayram minaret; the system isolates Roman fabric,
+          cleans contaminating elements, and reconstructs the first-century appearance.
+        </p>
+      </div>
+
+      <div class="showcase-hero">
+        <div>
+          <img src="/img/example/idai1_heroimage.png" alt="Original source photograph (idai1)" />
+          <div class="showcase-hero-label">Source photograph — Hacı Bayram complex (DAI)</div>
+        </div>
+        <div>
+          <img src="/img/example/idai1_reconstructed.jpeg" alt="First-century BCE reconstruction" />
+          <div class="showcase-hero-label">Reconstruction — Templum Divi Augusti, 25 BCE</div>
+        </div>
+      </div>
+
+      <div class="showcase-pipeline">
+        <div class="showcase-step">
+          <img src="/img/example/idai1_minaretcleaned.png" alt="Cleaned Canny edge map" />
+          <div class="showcase-step-label">
+            <span class="showcase-step-num">1</span>Canny edges (minaret region zeroed)
+          </div>
+        </div>
+        <div class="showcase-step">
+          <img src="/img/example/idai1_depth.png" alt="MiDaS depth map" />
+          <div class="showcase-step-label">
+            <span class="showcase-step-num">2</span>MiDaS monocular depth
+          </div>
+        </div>
+        <div class="showcase-step">
+          <img src="/img/example/idai1_reconstructed.jpeg" alt="SDXL reconstruction" />
+          <div class="showcase-step-label">
+            <span class="showcase-step-num">3</span>SDXL + ControlNet reconstruction
+          </div>
+        </div>
+      </div>
+    </div>
+
     <h2 class="section-title">Canonical Views</h2>
     <div id="hero-grid" class="hero-grid">
       <div class="loading">Loading reconstructions…</div>
@@ -967,7 +1092,7 @@
           SARS (Scholarly Architectural Reconstruction System) reconstructs the first-century BCE appearance of the
           <strong>Templum Divi Augusti</strong> in Ankara — a Corinthian peripteral temple dedicated to Augustus,
           partially preserved inside the Hacı Bayram Veli Mosque (1427 CE). The pipeline combines academic document
-          retrieval, vision-language model analysis of 62 photographs and architectural models, and controlled
+          retrieval, vision-language model analysis of 58 source images, and controlled
           image generation.
         </p>
 
@@ -975,16 +1100,17 @@
         <ol class="step-list">
           <li><strong>Ingestion</strong> — 18 academic PDFs (primary, comparative, theory, local) are chunked with
             semantic boundary detection and stored in a ChromaDB vector store using sentence-transformers embeddings.</li>
-          <li><strong>Conditioning Prep</strong> — All 62 source images receive Canny edge extraction (OpenCV) and
-            MiDaS depth estimation (Intel/dpt-large) to produce control signals for diffusion. Metadata is parsed
-            from standardised filenames and written to a conditioning registry.</li>
+          <li><strong>Conditioning Prep</strong> — All 66 source images receive Canny edge extraction (OpenCV) and
+            MiDaS depth estimation (Intel/dpt-large) where applicable. Filename-derived flags (minaret, scaffolding
+            position, mosque) drive region-zeroing on the Canny maps at prep time.</li>
           <li><strong>VLM Analysis</strong> — Each image is analysed with Gemma-3-4b-it. High-credibility sources
             undergo a two-pass strategy: a first pass generates a precise RAG query; a second pass re-analyzes with
             retrieved citation context. The output schema captures architectural elements, stratigraphic confidence,
             mosque-interference level, and an SDXL prompt component per image.</li>
-          <li><strong>Aggregation</strong> — Confirmed Roman elements are counted across all 62 analyses. Elements
-            appearing in ≥2 independent sources or with high VLM confidence are promoted to the canonical prompt.
-            Ottoman and mosque terms are stripped from every prompt component.</li>
+          <li><strong>Aggregation</strong> — Confirmed Roman elements are counted across all clean analyses
+            (contaminated full shots, details, and inscriptions are excluded). Elements appearing in ≥2 independent
+            sources or with high VLM confidence are promoted to the canonical prompt. Ottoman and mosque terms are
+            stripped from every prompt component.</li>
           <li><strong>Generation</strong> — SDXL base + ControlNet (canny) generates 1024×1024 reconstructions.
             Four canonical views are produced: front elevation, three-quarter, side elevation, and interior cella.
             Prompts are capped at 70 words to stay within CLIP's token window. All output is accompanied by a
@@ -998,7 +1124,8 @@
         </p>
         <ul>
           <li>Ottoman vocabulary is stripped from all VLM-extracted SDXL prompt components before generation.</li>
-          <li>Canny maps from minaret photos have their top 25% zeroed; mosque-adjacent shots lose their left 20%.</li>
+          <li>Canny maps are cleaned at prep time using filename-derived position tokens — minaret regions zeroed,
+            mosque walls trimmed, scaffolding masked per-position (top, middle-left, middle-right, etc.).</li>
           <li>Parallel temples — Maison Carrée (Nîmes) and Temple of Augustus (Pula) — provide uncontaminated
             Corinthian geometry as additional conditioning sources.</li>
         </ul>
@@ -1009,7 +1136,7 @@
           <li><strong>Comparative:</strong> Parallel temple studies (Maison Carrée, Pula, Nîmes)</li>
           <li><strong>Theory:</strong> Vitruvius, Books III &amp; IV (<em>De Architectura</em>)</li>
           <li><strong>Local:</strong> Ankara urban context and Ottoman period documentation</li>
-          <li><strong>Visual:</strong> 71 images — full shots, architectural models, details, inscriptions, parallels, plans</li>
+          <li><strong>Visual:</strong> 66 images — full shots, architectural models, details, inscriptions, parallels, plans</li>
         </ul>
 
       </div>
