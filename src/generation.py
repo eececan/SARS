@@ -156,7 +156,7 @@ STYLE_PREFIX = (
 )
 
 STYLE_SUFFIX = (
-    ", peripteral hexastyle, "
+    ", peripteral octastyle, "
     "no people, clear blue sky"
 )
 
@@ -271,6 +271,10 @@ def build_positive_prompt(
 
 
 def build_negative_prompt(analysis: dict) -> str:
+    # Note: do NOT enumerate "wrong" column counts (e.g. "6 columns, 7 columns")
+    # — SDXL's text encoder has no logical NOT operator, so listing those tokens
+    # actually injects those concepts as features. Let the canny conditioning
+    # hold geometric structure; the prompt only handles style/material.
     base = (
         "ruins, damage, missing sections, broken stone, weathering, moss, "
         "vegetation, cracks, graffiti, scaffolding, metal barriers, "
@@ -279,9 +283,7 @@ def build_negative_prompt(analysis: dict) -> str:
         "anachronistic details, fantasy architecture, CGI artifacts, "
         "oversaturation, lens flare, HDR, 3D render look, plastic appearance, "
         "low quality, blurry, deformed, "
-        "WRONG COLUMN COUNTS, 6 columns, 7 columns, 9 columns, 10 columns, 11 columns, "
-        "disproportionate columns, columns too tall, columns too short, "
-        "uneven column spacing, asymmetrical layout, truncated structure"
+        "disproportionate, asymmetrical layout, truncated structure"
     )
     mosque_addition = (
         ", Ottoman architecture, pointed arches, Islamic geometric ornament, "
@@ -415,8 +417,8 @@ def generate_reconstruction(
     vector_store=None,
     output_dir: str = "data/outputs",
     num_inference_steps: int = 40,
-    guidance_scale: float = 11.0,
-    controlnet_conditioning_scale: float = 0.75,
+    guidance_scale: float = 7.0,
+    controlnet_conditioning_scale: float = 1.0,
     use_canny: bool = True,
     use_depth: bool = False,
 ) -> dict:
@@ -519,7 +521,7 @@ def run_batch_generation(
     pipe,
     hw: dict,
     num_inference_steps: int = 40,
-    guidance_scale: float = 11.0,
+    guidance_scale: float = 7.0,
     resume: bool = True,
     max_images: int = None,
 ) -> list:
@@ -562,7 +564,10 @@ def run_batch_generation(
         filename = analysis["source_filename"]
         folder = analysis.get("source_folder", "")
         is_plan = folder == "plans"
-        conditioning_scale = 0.95 if is_plan else 0.75
+        # Higher scale = stronger adherence to source canny geometry.
+        # Plans need near-perfect adherence; other shots need strong adherence
+        # so SDXL reconstructs ON the input rather than hallucinating layout.
+        conditioning_scale = 1.1 if is_plan else 1.0
 
         print(f"[{i+1}/{total}] {filename}")
         print(f"  folder: {folder} | scale: {conditioning_scale}"

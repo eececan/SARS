@@ -142,6 +142,7 @@ def parse_filename_metadata(filename: str, folder: str) -> dict:
     viewpoint = _detect_viewpoint(stem)
 
     return {
+        "source_filename": filename,
         "source_type": source_type,
         "keywords": keywords,
         "folder": folder,
@@ -159,31 +160,98 @@ def parse_filename_metadata(filename: str, folder: str) -> dict:
     }
 
 
+# Hacı Bayram Mosque sits north/northwest of the temple cella.
+# The mosque silhouette (and its minaret) appears in different parts of the
+# canny frame depending on which side the photo was taken from.
+# Values are (zero_left_fraction, zero_right_fraction, zero_top_fraction).
+MOSQUE_REGION_BY_VIEWPOINT = {
+    "south_east": {"left": 0.30, "top": 0.35},   # mosque is upper-left/back
+    "southeast":  {"left": 0.30, "top": 0.35},
+    "south_west": {"right": 0.30, "top": 0.35},  # mosque is upper-right/back
+    "southwest":  {"right": 0.30, "top": 0.35},
+    "south":      {"top": 0.40},                  # mosque is behind, upper band
+    "east":       {"left": 0.35, "top": 0.30},
+    "west":       {"right": 0.35, "top": 0.30},
+    "north_east": {"top": 0.50, "left": 0.25},   # mosque dominates upper frame
+    "northeast":  {"top": 0.50, "left": 0.25},
+    "north_west": {"top": 0.50, "right": 0.25},
+    "northwest":  {"top": 0.50, "right": 0.25},
+    "north":      {"top": 0.55},                  # mosque fills front — heaviest masking
+}
+
+
+def _viewpoint_token(stem: str) -> str:
+    """Return the dominant cardinal/oblique direction token in stem, else ''."""
+    s = stem.lower()
+    for tok in ("south_east", "south_west", "north_east", "north_west",
+                "southeast", "southwest", "northeast", "northwest"):
+        if tok in s:
+            return tok
+    for tok in ("north", "south", "east", "west"):
+        if tok in s:
+            return tok
+    return ""
+
+
+def _suppress_thin_lines(edges: np.ndarray, min_thickness: int = 2) -> np.ndarray:
+    """
+    Suppress isolated thin lines (typical of steel scaffolding tubes)
+    while preserving thicker stone-edge clusters.
+    Morphological opening removes structures thinner than the kernel.
+    """
+    kernel = np.ones((min_thickness, min_thickness), np.uint8)
+    return cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel, iterations=1)
+
+
 def _apply_canny_cleaning(edges: np.ndarray, metadata: dict) -> np.ndarray:
     """
     Zero out contaminated regions of a 1024x1024 canny map based on
     filename-derived flags. Returns cleaned array.
+
+    Strategy:
+    - Mosque/minaret masking is viewpoint-aware (mosque is geographically
+      north of the temple, so its image position depends on shot direction)
+    - Scaffold positions still respected as before
+    - When scaffolding is present, run a morphological opening to suppress
+      thin steel-tube lines while preserving thicker stone edges
     """
     h, w = edges.shape
     cleaned = edges.copy()
 
-    # Minaret: always rises from top — zero top 30%
-    if metadata.get("has_minaret"):
-        cutoff = int(h * 0.30)
-        cleaned[:cutoff, :] = 0
-        print("    [CLEAN] Zeroed top 30% (minaret)")
+    stem = Path(metadata.get("source_filename", "")).stem if metadata.get("source_filename") else ""
+    viewpoint_tok = _viewpoint_token(stem)
 
-    # Mosque wall typically on left (north wall faces west in most shots)
-    if metadata.get("has_mosque"):
-        cutoff = int(w * 0.20)
-        cleaned[:, :cutoff] = 0
-        print("    [CLEAN] Zeroed left 20% (mosque wall)")
+    # Mosque + minaret: viewpoint-aware masking
+    if metadata.get("has_mosque") or metadata.get("has_minaret"):
+        region = MOSQUE_REGION_BY_VIEWPOINT.get(viewpoint_tok)
+        if region is None:
+            # Unknown viewpoint or interior shot — fall back to top band only
+            cutoff = int(h * 0.30)
+            cleaned[:cutoff, :] = 0
+            print(f"    [CLEAN] Mosque/minaret: zeroed top 30% (viewpoint unknown)")
+        else:
+            applied = []
+            if "top" in region:
+                c = int(h * region["top"])
+                cleaned[:c, :] = 0
+                applied.append(f"top {int(region['top']*100)}%")
+            if "left" in region:
+                c = int(w * region["left"])
+                cleaned[:, :c] = 0
+                applied.append(f"left {int(region['left']*100)}%")
+            if "right" in region:
+                c = int(w * region["right"])
+                cleaned[:, w-c:] = 0
+                applied.append(f"right {int(region['right']*100)}%")
+            tag = "minaret+mosque" if (metadata.get("has_mosque") and metadata.get("has_minaret")) \
+                  else ("minaret" if metadata.get("has_minaret") else "mosque")
+            print(f"    [CLEAN] {tag} ({viewpoint_tok}): zeroed {', '.join(applied)}")
 
-    # Scaffolding: zero per detected position
+    # Scaffolding: zero per detected position (poles/sheets), then suppress
+    # any remaining thin steel lines morphologically
     if metadata.get("has_scaffold"):
         positions = metadata.get("scaffold_positions", [])
         if not positions:
-            # Fallback: if no position parsed, zero top 25% (most common case)
             cleaned[:int(h * 0.25), :] = 0
             print("    [CLEAN] Zeroed top 25% (scaffolding, position unknown)")
         else:
@@ -211,6 +279,13 @@ def _apply_canny_cleaning(edges: np.ndarray, metadata: dict) -> np.ndarray:
                     c1 = int(w * (0.5 + frac / 2))
                     cleaned[:, c0:c1] = 0
                     print(f"    [CLEAN] Zeroed center {int(frac*100)}% horizontally (scaffold {pos})")
+
+        # Suppress thin steel-tube edges that survived the regional masking
+        before_count = int((cleaned > 0).sum())
+        cleaned = _suppress_thin_lines(cleaned, min_thickness=2)
+        after_count = int((cleaned > 0).sum())
+        removed_pct = 100 * (before_count - after_count) / max(before_count, 1)
+        print(f"    [CLEAN] Morphological steel-line suppression: removed {removed_pct:.0f}% of remaining edges")
 
     return cleaned
 
