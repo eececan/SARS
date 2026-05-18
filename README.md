@@ -5,7 +5,7 @@ A citation-grounded pipeline that reconstructs the first-century appearance of t
 
 | Source photograph | Reconstruction |
 |:---:|:---:|
-| ![Source](./web/images/idai1_heroimage.png) | ![Reconstruction](./web/images/idai1_reconstructed.jpeg) |
+| ![Source](./web/images/idai1_heroimage.jpeg) | ![Reconstruction](./web/images/idai1_reconstructed.jpeg) |
 | *Hacı Bayram complex (DAI)* | *Templum Divi Augusti, 25 BCE* |
 
 ---
