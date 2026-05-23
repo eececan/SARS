@@ -195,12 +195,27 @@ def _viewpoint_token(stem: str) -> str:
 
 def _suppress_thin_lines(edges: np.ndarray, min_thickness: int = 2) -> np.ndarray:
     """
-    Suppress isolated thin lines (typical of steel scaffolding tubes)
-    while preserving thicker stone-edge clusters.
-    Morphological opening removes structures thinner than the kernel.
+    Suppress isolated short edge fragments (typical of steel scaffolding
+    tubes) while preserving connected stone-edge structure.
+
+    A morphological opening with a square kernel deletes ALL edges thinner
+    than the kernel — and canny edges are only 1-2px wide, so opening also
+    erases stone edges. Instead, remove small connected components: real
+    structural edges form large connected contours, scaffolding tubes show
+    up as many small isolated specks after region masking.
     """
-    kernel = np.ones((min_thickness, min_thickness), np.uint8)
-    return cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel, iterations=1)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (edges > 0).astype(np.uint8), connectivity=8
+    )
+    cleaned = np.zeros_like(edges)
+    # Keep components above an area threshold; drop tiny isolated specks.
+    # Kept low so genuine short stone-edge segments survive — only true
+    # scaffolding specks (a handful of pixels) are removed.
+    min_area = 15
+    for label in range(1, num):
+        if stats[label, cv2.CC_STAT_AREA] >= min_area:
+            cleaned[labels == label] = 255
+    return cleaned
 
 
 def _apply_canny_cleaning(edges: np.ndarray, metadata: dict) -> np.ndarray:
@@ -301,15 +316,22 @@ def extract_canny(image_path: str, output_dir: str, subfolder: str,
     pil_img = resize_for_processing(image_path)
     img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
+    # Run Canny at the final 1024x1024 resolution. The previous code ran
+    # Canny at 896px then upscaled the binary map with INTER_LINEAR, which
+    # blurred 1px edges into 2-3px gray smears — inflating apparent edge
+    # coverage with artifacts. Resize the grayscale image first instead.
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
-    resized = cv2.resize(edges, (1024, 1024), interpolation=cv2.INTER_LINEAR)
+    gray = cv2.resize(gray, (1024, 1024), interpolation=cv2.INTER_AREA)
+    # Low thresholds + minimal blur: these are low-contrast weathered-stone
+    # ruins and parallel temples; higher settings left genuine edge
+    # coverage at only 3-5%, too sparse for ControlNet to anchor structure.
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    edges = cv2.Canny(blurred, threshold1=15, threshold2=45)
 
     if metadata:
-        resized = _apply_canny_cleaning(resized, metadata)
+        edges = _apply_canny_cleaning(edges, metadata)
 
-    cv2.imwrite(str(out_path), resized)
+    cv2.imwrite(str(out_path), edges)
     return str(out_path)
 
 

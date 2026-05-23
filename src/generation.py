@@ -52,6 +52,47 @@ def detect_hardware() -> dict:
 # Pipeline loading
 # ---------------------------------------------------------------------------
 
+def load_sdxl_inpaint_pipeline(hw: dict, base_pipe=None):
+    """Load SDXL inpainting pipeline for stage-2 completion.
+
+    Shares weights with base_pipe when provided to avoid double VRAM cost.
+    """
+    from diffusers import StableDiffusionXLInpaintPipeline
+
+    if base_pipe is not None:
+        pipe = StableDiffusionXLInpaintPipeline(
+            vae=base_pipe.vae,
+            text_encoder=base_pipe.text_encoder,
+            text_encoder_2=base_pipe.text_encoder_2,
+            tokenizer=base_pipe.tokenizer,
+            tokenizer_2=base_pipe.tokenizer_2,
+            unet=base_pipe.unet,
+            scheduler=base_pipe.scheduler,
+        )
+    else:
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained(
+            "madebyollin/sdxl-vae-fp16-fix",
+            torch_dtype=hw["torch_dtype"],
+        )
+        pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            vae=vae,
+            torch_dtype=hw["torch_dtype"],
+            variant=hw["variant"],
+            use_safetensors=True,
+        )
+
+    if hw["device"] == "cuda":
+        pipe = pipe.to("cuda")
+        pipe.enable_attention_slicing()
+    else:
+        pipe.enable_attention_slicing()
+        pipe.enable_sequential_cpu_offload()
+
+    return pipe
+
+
 def load_sdxl_pipeline(
     hw: dict,
     use_canny: bool = True,
@@ -343,50 +384,22 @@ def _score_analysis(a: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Canny map cleaning
+# Canny map loading
 # ---------------------------------------------------------------------------
-
-_CLEAN_TERMS = ["minaret", "ottoman", "mosque", "scaffold", "support", "haci"]
-
-
-def _needs_cleaning(filename: str) -> bool:
-    return any(t in filename.lower() for t in _CLEAN_TERMS)
+# Canny cleaning (minaret/mosque/scaffold masking) happens once in Step 2
+# (conditioning_prep.py). It is intentionally NOT repeated here.
 
 
-def clean_canny_map(
-    canny_path: str,
-    analysis: dict,
-    output_dir: str = "data/conditioning/canny_clean",
-) -> str:
+def _canny_coverage(canny_path: str) -> float:
+    """Fraction of non-zero pixels in a canny map (0.0-1.0), or None if
+    the map is missing/unreadable."""
+    if not canny_path or not Path(canny_path).exists():
+        return None
     import cv2
-    import numpy as np
-
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
     img = cv2.imread(canny_path, cv2.IMREAD_GRAYSCALE)
-    h, w = img.shape
-    cleaned = img.copy()
-    filename = analysis.get("source_filename", "").lower()
-
-    if any(t in filename for t in ["minaret", "ottoman"]):
-        cutoff = int(h * 0.25)
-        cleaned[:cutoff, :] = 0
-        print("  [CLEAN] Removed top 25% (minaret region)")
-
-    if any(t in filename for t in ["scaffold", "support", "metal"]):
-        kernel = np.ones((3, 3), np.uint8)
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=2)
-        print("  [CLEAN] Applied morphological opening (scaffolding removal)")
-
-    if any(t in filename for t in ["mosque", "haci", "north"]):
-        cutoff = int(w * 0.20)
-        cleaned[:, :cutoff] = 0
-        print("  [CLEAN] Removed left 20% (mosque region)")
-
-    stem = Path(canny_path).stem
-    out_path = Path(output_dir) / f"{stem}_clean.png"
-    cv2.imwrite(str(out_path), cleaned)
-    return str(out_path)
+    if img is None:
+        return None
+    return float((img > 0).sum()) / img.size
 
 
 def _load_canny(
@@ -394,15 +407,98 @@ def _load_canny(
     conditioning_registry_path: str,
     analysis: dict,
 ) -> Image.Image:
-    if _needs_cleaning(source_filename):
-        import tempfile
-        raw = load_conditioning_image(source_filename, conditioning_registry_path, mode="canny")
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            raw.save(tmp.name)
-            clean_path = clean_canny_map(tmp.name, analysis)
-        print("  [CLEAN] Using cleaned canny map")
-        return Image.open(clean_path).convert("RGB")
+    # Canny maps are already cleaned in Step 2 (conditioning_prep.py:
+    # _apply_canny_cleaning — viewpoint-aware minaret/mosque/scaffold
+    # masking baked into the saved *_canny.png). Re-cleaning here would
+    # zero regions twice and apply a second morphological pass, which
+    # collapsed the structural signal. Use the saved map as-is.
     return load_conditioning_image(source_filename, conditioning_registry_path, mode="canny")
+
+
+# ---------------------------------------------------------------------------
+# Stage-2: blank/low-detail region detection for inpainting
+# ---------------------------------------------------------------------------
+
+def _detect_completion_mask(
+    image: Image.Image,
+    canny_image: Image.Image = None,
+    variance_threshold: float = 80.0,
+    block: int = 32,
+    dilate_px: int = 24,
+) -> Image.Image:
+    """Find regions of `image` that look unfinished — flat/uniform patches
+    far from any source canny edges. These are the 'collage gray' areas
+    where ControlNet had no guidance and SDXL left a blank.
+
+    Returns a binary PIL mask (white = inpaint, black = keep).
+    """
+    import numpy as np
+    import cv2
+
+    arr = np.array(image.convert("RGB"))
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    h, w = gray.shape
+
+    # Local variance via blockwise std
+    mask = np.zeros((h, w), dtype=np.uint8)
+    for y in range(0, h, block):
+        for x in range(0, w, block):
+            patch = gray[y:y + block, x:x + block]
+            if patch.size == 0:
+                continue
+            if patch.var() < variance_threshold:
+                mask[y:y + block, x:x + block] = 255
+
+    # Don't inpaint regions where we DID have canny structure — those are
+    # the parts ControlNet anchored, so the output there is intentional.
+    if canny_image is not None:
+        c = np.array(canny_image.convert("L"))
+        if c.shape != (h, w):
+            c = cv2.resize(c, (w, h), interpolation=cv2.INTER_AREA)
+        # Dilate canny edges into a "trust zone" — anything within ~24px of
+        # a real source edge is structure SDXL was guided on; spare it.
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_px*2+1, dilate_px*2+1))
+        trust = cv2.dilate((c > 0).astype(np.uint8) * 255, kernel)
+        mask[trust > 0] = 0
+
+    # Smooth the mask edges so inpainting blends instead of cutting hard
+    mask = cv2.GaussianBlur(mask, (21, 21), 0)
+    _, mask = cv2.threshold(mask, 64, 255, cv2.THRESH_BINARY)
+
+    return Image.fromarray(mask)
+
+
+def _inpaint_completion(
+    base_image: Image.Image,
+    mask: Image.Image,
+    positive: str,
+    negative: str,
+    inpaint_pipe,
+    num_inference_steps: int = 30,
+    guidance_scale: float = 8.5,
+    strength: float = 0.95,
+) -> Image.Image:
+    """Run SDXL inpainting on the flagged regions to complete missing
+    structure. High strength (0.95) so the gray placeholder gets fully
+    replaced with prompt-driven content."""
+    import numpy as np
+
+    if np.array(mask).max() == 0:
+        # Nothing to inpaint — stage 1 was already complete
+        return base_image
+
+    result = inpaint_pipe(
+        prompt=positive,
+        negative_prompt=negative,
+        image=base_image,
+        mask_image=mask,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        strength=strength,
+        width=1024,
+        height=1024,
+    ).images[0]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +517,8 @@ def generate_reconstruction(
     controlnet_conditioning_scale: float = 1.0,
     use_canny: bool = True,
     use_depth: bool = False,
+    inpaint_pipe=None,
+    control_guidance_end: float = 0.55,
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -452,16 +550,35 @@ def generate_reconstruction(
     image_arg = conditioning_images[0] if len(conditioning_images) == 1 else conditioning_images
     scale_arg = conditioning_scales[0] if len(conditioning_scales) == 1 else conditioning_scales
 
+    # Stage 1: ControlNet only guides the first ~55% of denoising. Canny
+    # anchors layout early; later steps let SDXL complete missing geometry
+    # instead of leaving the gray/blank regions you'd get at full scale.
     result_image = pipe(
         prompt=positive,
         negative_prompt=negative,
         image=image_arg,
         controlnet_conditioning_scale=scale_arg,
+        control_guidance_end=control_guidance_end,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
         width=1024,
         height=1024,
     ).images[0]
+
+    # Stage 2: find any flat/uniform patches that still look unfinished
+    # (regions where the source had no canny edges) and inpaint them.
+    inpaint_applied = False
+    if inpaint_pipe is not None and use_canny:
+        first_canny = conditioning_images[0] if conditioning_images else None
+        completion_mask = _detect_completion_mask(result_image, canny_image=first_canny)
+        import numpy as np
+        mask_coverage = float((np.array(completion_mask) > 0).sum()) / (1024 * 1024)
+        print(f"  Stage 2 mask coverage: {mask_coverage:.1%}")
+        if mask_coverage > 0.02:
+            result_image = _inpaint_completion(
+                result_image, completion_mask, positive, negative, inpaint_pipe,
+            )
+            inpaint_applied = True
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -487,6 +604,8 @@ def generate_reconstruction(
             "controlnet_conditioning_scale": controlnet_conditioning_scale,
             "use_canny": use_canny,
             "use_depth": use_depth,
+            "control_guidance_end": control_guidance_end,
+            "inpaint_stage_applied": inpaint_applied,
             "hardware": hw.get("device"),
             "gpu_name": hw.get("gpu_name"),
         },
@@ -524,6 +643,7 @@ def run_batch_generation(
     guidance_scale: float = 7.0,
     resume: bool = True,
     max_images: int = None,
+    inpaint_pipe=None,
 ) -> list:
     output_dir = Path(output_dir)
     recon_dir = output_dir / "reconstructions"
@@ -577,10 +697,13 @@ def run_batch_generation(
         filename = analysis["source_filename"]
         folder = analysis.get("source_folder", "")
         is_plan = folder == "plans"
-        # ControlNet scale: high values cause SDXL to merely fill in source edges
-        # (e.g. column close-ups → just columns). Moderate scale lets prompt
-        # drive temple reconstruction while keeping general structure from source.
-        conditioning_scale = 1.0 if is_plan else 0.55
+        # ControlNet scale: lowered from 0.75 → 0.45 because the canny maps
+        # capture broken/partial structure. At high scale, SDXL faithfully
+        # reproduces fragmentation (floating columns, half-walls). At 0.45
+        # plus control_guidance_end=0.55, canny anchors layout in the first
+        # half of denoising and SDXL completes the missing geometry in the
+        # second half. Plans stay at full scale — they ARE complete.
+        conditioning_scale = 1.0 if is_plan else 0.45
 
         print(f"[{i+1}/{total}] {filename}")
         print(f"  folder: {folder} | scale: {conditioning_scale}"
@@ -605,6 +728,8 @@ def run_batch_generation(
                 controlnet_conditioning_scale=conditioning_scale,
                 use_canny=True,
                 use_depth=False,
+                inpaint_pipe=inpaint_pipe,
+                control_guidance_end=1.0 if is_plan else 0.55,
             )
             elapsed = time.time() - start
             print(f"  ✓ {elapsed:.0f}s")
@@ -800,7 +925,10 @@ CANONICAL_VIEWS = [
         "prefer_folder": "parallels/maison_carree",
         "prefer_keywords": ["front"],
         "fallback_folder": "architectural_models",
+        # Parallels (Maison Carrée) are intact temples; their canny maps are
+        # already complete, so a moderate scale is safe.
         "conditioning_scale": 0.55,
+        "control_guidance_end": 0.7,
     },
     {
         "name": "three_quarter",
@@ -809,6 +937,7 @@ CANONICAL_VIEWS = [
         "prefer_keywords": ["drawing", "model"],
         "fallback_folder": "parallels/pula",
         "conditioning_scale": 0.55,
+        "control_guidance_end": 0.7,
     },
     {
         "name": "side_elevation",
@@ -817,6 +946,7 @@ CANONICAL_VIEWS = [
         "prefer_keywords": ["side"],
         "fallback_folder": "parallels/pula",
         "conditioning_scale": 0.55,
+        "control_guidance_end": 0.7,
     },
     {
         "name": "interior_cella",
@@ -824,7 +954,10 @@ CANONICAL_VIEWS = [
         "prefer_folder": "full_shots",
         "prefer_keywords": ["interior", "cella", "inside"],
         "fallback_folder": "full_shots",
-        "conditioning_scale": 0.50,
+        # The interior shots come from the Ankara ruin — partial walls,
+        # missing roof. Low scale + early stop so SDXL completes structure.
+        "conditioning_scale": 0.40,
+        "control_guidance_end": 0.5,
     },
 ]
 
@@ -858,6 +991,14 @@ def _score_for_generation(analysis: dict, entry: dict) -> int:
     if entry.get("has_ottoman_elements"):
         score -= 3
 
+    # Reject near-blank canny maps. Normal architectural photos sit around
+    # 9-14% edge coverage (lots of flat sky/marble, 1px edges); maps below
+    # ~6% are genuinely empty — heavy contamination masking or a near-
+    # featureless source — and let SDXL hallucinate the composition.
+    coverage = _canny_coverage(entry.get("canny_path"))
+    if coverage is not None and coverage < 0.06:
+        score -= 100  # effectively disqualify
+
     return score
 
 
@@ -871,6 +1012,7 @@ def generate_canonical_views(
     num_inference_steps: int = 40,
     guidance_scale: float = 11.0,
     plan_context: str = "",
+    inpaint_pipe=None,
 ) -> list:
     if not plan_context:
         plan_context = load_plan_context(analysis_dir)
@@ -959,16 +1101,31 @@ def generate_canonical_views(
 
         start = time.time()
 
+        cg_end = view.get("control_guidance_end", 0.7)
         result_image = pipe(
             prompt=positive,
             negative_prompt=negative,
             image=canny_img,
             controlnet_conditioning_scale=view["conditioning_scale"],
+            control_guidance_end=cg_end,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             width=1024,
             height=1024,
         ).images[0]
+
+        # Stage 2: inpaint any leftover flat/blank patches
+        inpaint_applied = False
+        if inpaint_pipe is not None:
+            completion_mask = _detect_completion_mask(result_image, canny_image=canny_img)
+            import numpy as np
+            mask_coverage = float((np.array(completion_mask) > 0).sum()) / (1024 * 1024)
+            print(f"  Stage 2 mask coverage: {mask_coverage:.1%}")
+            if mask_coverage > 0.02:
+                result_image = _inpaint_completion(
+                    result_image, completion_mask, positive, negative, inpaint_pipe,
+                )
+                inpaint_applied = True
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = recon_dir / f"{view['name']}_reconstruction_{timestamp}.png"
@@ -990,6 +1147,8 @@ def generate_canonical_views(
                 "num_inference_steps": num_inference_steps,
                 "guidance_scale": guidance_scale,
                 "controlnet_scale": view["conditioning_scale"],
+                "control_guidance_end": cg_end,
+                "inpaint_stage_applied": inpaint_applied,
                 "hardware": hw.get("device"),
             },
             "timestamp": timestamp,
