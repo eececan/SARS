@@ -536,8 +536,43 @@ def generate_reconstruction(
         conditioning_images.append(depth_img)
         conditioning_scales.append(controlnet_conditioning_scale * 0.6)
 
-    image_arg = conditioning_images[0] if len(conditioning_images) == 1 else conditioning_images
-    scale_arg = conditioning_scales[0] if len(conditioning_scales) == 1 else conditioning_scales
+    # Pipeline may have been loaded with both canny + depth ControlNets
+    # (for canonical views). Diffusers requires #images == #controlnets.
+    # If the caller only requested one but the pipe has two, pad the
+    # missing slot with the available conditioning at scale 0 so it
+    # contributes nothing. This keeps single-control behavior identical
+    # while satisfying the API.
+    num_cn = 1
+    try:
+        cn = pipe.controlnet
+        nets = getattr(cn, "nets", None)
+        if nets is not None:
+            num_cn = len(nets)
+        elif isinstance(cn, (list, tuple)):
+            num_cn = len(cn)
+    except Exception:
+        pass
+
+    while len(conditioning_images) < num_cn:
+        # Try the other modality from the registry first; fall back to
+        # the canny image itself as a no-op placeholder (scale=0).
+        added = False
+        if use_canny and not use_depth:
+            try:
+                depth_img = load_conditioning_image(
+                    source_filename, conditioning_registry_path, mode="depth"
+                )
+                conditioning_images.append(depth_img)
+                conditioning_scales.append(0.0)
+                added = True
+            except (ValueError, FileNotFoundError):
+                pass
+        if not added:
+            conditioning_images.append(conditioning_images[0])
+            conditioning_scales.append(0.0)
+
+    image_arg = conditioning_images[0] if num_cn == 1 else conditioning_images
+    scale_arg = conditioning_scales[0] if num_cn == 1 else conditioning_scales
 
     # Stage 1: ControlNet only guides the first ~55% of denoising. Canny
     # anchors layout early; later steps let SDXL complete missing geometry
@@ -877,20 +912,18 @@ def build_aggregated_prompt(
             pass
 
     positive = (
-        "photorealistic architectural render, "
-        "first century BCE Roman temple, "
+        "photorealistic Roman temple, "
         "Templum Divi Augusti Ankara 25 BCE, "
-        "pristine marble construction, "
-        "Mediterranean golden hour sunlight, "
+        "polished Pentelic marble, fine veining, "
+        "golden hour sunlight, "
         f"{CONFIRMED_COLUMN_FACTS}, "
         f"{confirmed_str}, "
-        "peripteral Corinthian order, "
-        "complete entablature and pediment, "
-        "white Pentelic marble podium with steps, "
+        "deep fluted shafts, ornate Corinthian capitals, acanthus leaf carving, "
+        "carved frieze, dentil moulding, "
+        "gilded bronze acroteria, gold leaf accents, "
+        "marble podium with steps, "
         f"{rag_supplement}, "
-        "archaeologically accurate reconstruction, "
-        "sharp architectural detail, "
-        "no people, clear blue Anatolian sky"
+        "sharp detail, crisp shadows, no people"
     )
 
     base_negative = (
@@ -898,7 +931,15 @@ def build_aggregated_prompt(
         "vegetation, cracks, scaffolding, metal barriers, concrete repairs, "
         "modern buildings, power lines, cars, people, fantasy architecture, "
         "incorrect proportions, CGI artifacts, oversaturation, lens flare, "
-        "HDR, 3D render look, low quality, blurry"
+        "HDR, 3D render look, low quality, blurry, "
+        # Suppress the procedural-canny failure modes seen in practice:
+        "nested buildings, building inside building, doorway with temple visible through it, "
+        "picture frame, archway, multiple temples, "
+        "duplicate columns, columns behind columns, "
+        # Suppress the "phantom second pediment floating above the real one"
+        # that stage-1 ControlNet sometimes produces:
+        "double pediment, stacked pediments, second pediment above pediment, "
+        "floating cornice, detached roof block"
     )
 
     if aggregated.get("dominant_mosque_interference") in ("partial", "dominant"):
@@ -908,6 +949,21 @@ def build_aggregated_prompt(
         )
 
     return positive, base_negative
+
+
+def build_per_view_negative(base_negative: str, view_name: str) -> str:
+    """Tighten the negative prompt for specific views. Side elevation
+    needs explicit anti-pediment language because SDXL's 'Roman temple'
+    prior assumes a pediment is visible — but flank views shouldn't show
+    one. Returns the augmented negative."""
+    if view_name == "side_elevation":
+        return base_negative + (
+            ", triangular pediment, any pediment, gable end, raking cornice, "
+            "tympanum, acroterion, front facade visible, end view, "
+            "pediment on flank, pediment in side view, "
+            "triangular roof element, pointed roof, gable triangle"
+        )
+    return base_negative
 
 
 # ---------------------------------------------------------------------------
@@ -926,29 +982,57 @@ CANONICAL_VIEWS = [
     # from the documented temple dimensions (8 cols front, 15 cols side,
     # 2m intercolumniation, etc.). The geometry is ours, not borrowed
     # from a hexastyle parallel — so the output has exactly 8 columns.
+    #
+    # Scale rebalance: depth dominates (filled silhouette = "one solid
+    # temple here"), canny only hints at column placement. Previous
+    # canny-dominant configuration (0.85/0.45) made SDXL read internal
+    # wireframe lines as nested structures → temple-inside-temple.
     {
+        # Scales loosened (canny 0.55→0.42, depth 0.85→0.65, end 0.75→0.55)
+        # to free SDXL for detail elaboration in the back half of denoising.
+        # The procedural conditioning is much sparser than three-quarter's
+        # idai7 source, so it was over-constraining structure at the cost
+        # of stone/Corinthian/gold detail.
         "name": "front_elevation",
         "title": "Front Elevation",
         "mode": "procedural",
-        "canny_scale": 0.85,         # high — we trust our own geometry
-        "depth_scale": 0.45,
-        "control_guidance_end": 0.8,
+        "canny_scale": 0.42,
+        "depth_scale": 0.65,
+        "control_guidance_end": 0.55,
+        # Stage 2 inpainting hallucinates phantom geometry in the sky
+        # wedges beside the procedural pediment. Skip for procedural views.
+        "skip_inpaint": True,
     },
     {
         "name": "side_elevation",
         "title": "Side Elevation",
         "mode": "procedural",
-        "canny_scale": 0.85,
-        "depth_scale": 0.45,
-        "control_guidance_end": 0.8,
+        "canny_scale": 0.42,
+        "depth_scale": 0.65,
+        "control_guidance_end": 0.55,
+        "skip_inpaint": True,
     },
     {
+        # Three-quarter uses idai7 (architectural drawing of the Ankara
+        # temple at south-west angle) as canny source. Procedural cabinet-
+        # oblique and 2-point perspective both failed in practice because
+        # SDXL's photographic prior fights drafting conventions. idai7 is
+        # already a real-perspective drawing of the right temple, so its
+        # canny gives SDXL natural geometry. Low canny scale + early stop
+        # so the output isn't a literal copy of the drawing.
+        # Depth scale dropped (0.55 → 0.30) because MiDaS depth on a
+        # drawing (not a photo) creates a "ghost wall" blur in the sky
+        # region above the temple.
         "name": "three_quarter",
         "title": "Three-Quarter View",
-        "mode": "procedural",
-        "canny_scale": 0.80,
-        "depth_scale": 0.55,          # depth carries the 3D structure here
-        "control_guidance_end": 0.8,
+        "mode": "source",
+        "prefer_folder": "architectural_models",
+        "prefer_keywords": ["idai7"],
+        "fallback_folder": "architectural_models",
+        "canny_scale": 0.45,
+        "depth_scale": 0.30,
+        "control_guidance_end": 0.55,
+        "skip_inpaint": True,
     },
     # Interior cella: no procedural option (no plan data for interior).
     # Stays on the Ankara ruin's canny + MiDaS depth.
@@ -1146,6 +1230,7 @@ def generate_canonical_views(
 
         start = time.time()
         cg_end = view.get("control_guidance_end", 0.7)
+        view_negative = build_per_view_negative(negative, view["name"])
 
         # Assemble multi-ControlNet inputs. If depth is available we pass
         # [canny, depth] with separate scales — the pipeline was loaded
@@ -1160,7 +1245,7 @@ def generate_canonical_views(
         try:
             result_image = pipe(
                 prompt=positive,
-                negative_prompt=negative,
+                negative_prompt=view_negative,
                 image=image_arg,
                 controlnet_conditioning_scale=scale_arg,
                 control_guidance_end=cg_end,
@@ -1175,7 +1260,7 @@ def generate_canonical_views(
             print(f"  ! retry without control_guidance_end ({e})")
             result_image = pipe(
                 prompt=positive,
-                negative_prompt=negative,
+                negative_prompt=view_negative,
                 image=image_arg,
                 controlnet_conditioning_scale=scale_arg,
                 num_inference_steps=num_inference_steps,
@@ -1184,9 +1269,11 @@ def generate_canonical_views(
                 height=1024,
             ).images[0]
 
-        # Stage 2: inpaint any leftover flat/blank patches
+        # Stage 2: inpaint any leftover flat/blank patches. Views can
+        # opt out via `skip_inpaint` — procedural views and clean drawings
+        # have so much uniform area that the mask detector hallucinates.
         inpaint_applied = False
-        if inpaint_pipe is not None:
+        if inpaint_pipe is not None and not view.get("skip_inpaint", False):
             completion_mask = _detect_completion_mask(result_image, canny_image=canny_img)
             import numpy as np
             mask_coverage = float((np.array(completion_mask) > 0).sum()) / (1024 * 1024)
@@ -1196,6 +1283,8 @@ def generate_canonical_views(
                     result_image, completion_mask, positive, negative, inpaint_pipe,
                 )
                 inpaint_applied = True
+        elif view.get("skip_inpaint", False):
+            print(f"  Stage 2: skipped (skip_inpaint=True)")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = recon_dir / f"{view['name']}_reconstruction_{timestamp}.png"
