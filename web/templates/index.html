@@ -1375,6 +1375,51 @@
     }
     html += `</div>`;
 
+    // Plan dimensions used to drive procedural canny
+    const dims = data.plan_dimensions || {};
+    if (Object.keys(dims).length) {
+      html += `<div class="brief-section"><h4>Documented Plan Dimensions</h4>`;
+      html += `<p style="color:var(--text-lt);font-size:0.78rem;margin-bottom:6px">`
+            + `These numbers (aggregated from plans VLM + scholarship defaults) drive the procedural `
+            + `canny generator for the front, side, and three-quarter views.</p>`;
+      html += `<table class="confidence-table" style="width:100%;font-size:0.82rem"><tbody>`;
+      for (const [k, v] of Object.entries(dims)) {
+        html += `<tr><td>${escHtml(k)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${escHtml(String(v))}</td></tr>`;
+      }
+      html += `</tbody></table></div>`;
+    }
+
+    // Confidence zones: per-category evidence strength rolled up across sources
+    const zones = data.confidence_zones || [];
+    if (zones.length) {
+      html += `<div class="brief-section"><h4>Confidence Zones</h4>`;
+      html += `<p style="color:var(--text-lt);font-size:0.78rem;margin-bottom:6px">`
+            + `Average evidence strength per category across all VLM analyses (0–1 scale). `
+            + `<strong>confirmed_roman</strong> = visible documented Roman fabric; `
+            + `<strong>roman_inferred</strong> = consistent with Roman but extrapolated; `
+            + `<strong>uncertain</strong> = ruined / interpretive regions.</p>`;
+      html += `<table class="confidence-table" style="width:100%;font-size:0.82rem">`;
+      html += `<thead><tr><th>Category</th><th>Mean</th><th>Range</th><th>Sources</th></tr></thead><tbody>`;
+      zones.forEach(z => {
+        // Color the row by category meaning
+        const stripe = z.category === 'confirmed_roman' ? '#2d8f4e'
+                     : z.category === 'roman_inferred' ? '#c08a2f'
+                     : z.category === 'uncertain' ? '#b04040'
+                     : '#777';
+        const pct = Math.round(z.mean * 100);
+        html += `<tr style="border-left:3px solid ${stripe}">
+          <td>${escHtml(z.category)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">
+            <span class="confidence-bar" style="width:${Math.max(4, Math.round(z.mean*80))}px"></span>
+            ${pct}%
+          </td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-lt);font-size:0.78rem">${z.min}–${z.max}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${z.n_sources}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
     div.innerHTML = html;
   }
 

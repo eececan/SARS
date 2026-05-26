@@ -146,10 +146,54 @@ def api_analyses():
 
 @app.route("/api/brief")
 def api_brief():
-    """Return the aggregated analysis brief."""
+    """Return the aggregated analysis brief, including confidence_zones
+    aggregation across all analyses (per-region evidence strength) and
+    procedural plan dimensions (column counts etc.)."""
     try:
         from src.generation import aggregate_all_analyses
         result = aggregate_all_analyses(str(ANALYSIS_DIR))
+
+        # Aggregate confidence_zones: each analysis has e.g.
+        #   {"confirmed_roman": 0.8, "roman_inferred": 0.6, "uncertain": 0.2}
+        # Roll those up into mean ± stdev per category across all sources.
+        zone_values: dict[str, list[float]] = {}
+        for f in ANALYSIS_DIR.glob("*_analysis.json"):
+            try:
+                a = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if "error" in a:
+                continue
+            cz = a.get("confidence_zones") or {}
+            if not isinstance(cz, dict):
+                continue
+            for category, value in cz.items():
+                if isinstance(value, (int, float)):
+                    zone_values.setdefault(category, []).append(float(value))
+
+        zones_out = []
+        for category, values in zone_values.items():
+            if not values:
+                continue
+            mean = sum(values) / len(values)
+            zones_out.append({
+                "category": category,
+                "mean": round(mean, 3),
+                "min": round(min(values), 3),
+                "max": round(max(values), 3),
+                "n_sources": len(values),
+            })
+        # Sort by mean descending so highest-confidence categories show first
+        zones_out.sort(key=lambda z: -z["mean"])
+        result["confidence_zones"] = zones_out
+
+        # Procedural plan dimensions (drives canonical canny generation)
+        try:
+            from src.procedural_canny import load_plan_dims_aggregated
+            result["plan_dimensions"] = load_plan_dims_aggregated(str(ANALYSIS_DIR))
+        except Exception:
+            result["plan_dimensions"] = {}
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

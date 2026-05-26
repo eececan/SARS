@@ -160,17 +160,12 @@ def load_sdxl_pipeline(
 # ---------------------------------------------------------------------------
 
 # Coulton 1976, Hänlein-Schäfer 1985, Mitchell & Waelkens 1998:
-# 8 columns across the exterior facade (octastyle),
-# 4 columns between the exterior columns and the cella wall (in antis),
-# giving 12 columns total across the front.
-# 15 columns along each side (including corner columns).
+# octastyle facade (8 exterior columns), 15 along each flank, peripteral.
+# The actual column count is anchored by canny — CLIP doesn't reason
+# about "EXACTLY 8" — so this string is kept short to leave token
+# budget for STYLE_PREFIX + per-image VLM description (CLIP cap = 77).
 CONFIRMED_COLUMN_FACTS = (
-    "STRICT ARCHITECTURAL CONSTRAINTS: "
-    "octastyle facade with EXACTLY 8 exterior columns across front, "
-    "4 columns in antis (between exterior and cella), "
-    "12 columns TOTAL across front elevation, "
-    "15 columns per side flank (including corners), "
-    "peripteral layout with continuous colonnade all sides"
+    "octastyle peripteral Corinthian temple, complete colonnade all sides"
 )
 
 # ---------------------------------------------------------------------------
@@ -439,7 +434,6 @@ def _detect_completion_mask(
     gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
     h, w = gray.shape
 
-    # Local variance via blockwise std
     mask = np.zeros((h, w), dtype=np.uint8)
     for y in range(0, h, block):
         for x in range(0, w, block):
@@ -449,19 +443,14 @@ def _detect_completion_mask(
             if patch.var() < variance_threshold:
                 mask[y:y + block, x:x + block] = 255
 
-    # Don't inpaint regions where we DID have canny structure — those are
-    # the parts ControlNet anchored, so the output there is intentional.
     if canny_image is not None:
         c = np.array(canny_image.convert("L"))
         if c.shape != (h, w):
             c = cv2.resize(c, (w, h), interpolation=cv2.INTER_AREA)
-        # Dilate canny edges into a "trust zone" — anything within ~24px of
-        # a real source edge is structure SDXL was guided on; spare it.
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_px*2+1, dilate_px*2+1))
         trust = cv2.dilate((c > 0).astype(np.uint8) * 255, kernel)
         mask[trust > 0] = 0
 
-    # Smooth the mask edges so inpainting blends instead of cutting hard
     mask = cv2.GaussianBlur(mask, (21, 21), 0)
     _, mask = cv2.threshold(mask, 64, 255, cv2.THRESH_BINARY)
 
@@ -649,10 +638,15 @@ def run_batch_generation(
     recon_dir = output_dir / "reconstructions"
     recon_dir.mkdir(parents=True, exist_ok=True)
 
-    # Skip folders that produce close-up canny maps (no full structure visible)
+    # Skip folders that:
+    # - produce close-up canny maps (no full structure visible): details, inscriptions
+    # - are intact reference temples that should NOT be regenerated: parallels/*
+    #   (those are comparanda — reconstructing them just produces softer copies)
     SKIP_FOLDERS = {"details", "inscriptions"}
+    SKIP_FOLDER_PREFIXES = ("parallels",)
     # Skip filenames that indicate close-up shots (column-only, capital-only)
-    SKIP_KEYWORDS = ("columncapital", "lion", "relief", "_columns.")
+    # or fragmentary technical drawings that confuse the structural prior.
+    SKIP_KEYWORDS = ("columncapital", "lion", "relief", "_columns.", "fragmentary")
 
     analyses = []
     for f in sorted(Path(analysis_dir).glob("*_analysis.json")):
@@ -662,6 +656,8 @@ def run_batch_generation(
         folder = data.get("source_folder", "")
         fname = data.get("source_filename", "").lower()
         if folder in SKIP_FOLDERS:
+            continue
+        if any(folder.startswith(pfx) for pfx in SKIP_FOLDER_PREFIXES):
             continue
         if any(kw in fname for kw in SKIP_KEYWORDS):
             continue
@@ -918,46 +914,54 @@ def build_aggregated_prompt(
 # Canonical views using aggregated prompt
 # ---------------------------------------------------------------------------
 
+# Sources to exclude from canonical-view selection: technical drawings
+# with multiple scaled views, partial cutaways, or fragmentary states.
+# These canny maps look like "multiple buildings on one page" to ControlNet
+# and cause the temple-inside-temple compositional failure.
+CANONICAL_BAD_KEYWORDS = ("fragmentary", "cutaway", "section")
+
+
 CANONICAL_VIEWS = [
+    # Three exterior elevations use PROCEDURAL canny+depth synthesised
+    # from the documented temple dimensions (8 cols front, 15 cols side,
+    # 2m intercolumniation, etc.). The geometry is ours, not borrowed
+    # from a hexastyle parallel — so the output has exactly 8 columns.
     {
         "name": "front_elevation",
         "title": "Front Elevation",
-        "prefer_folder": "parallels/maison_carree",
-        "prefer_keywords": ["front"],
-        "fallback_folder": "architectural_models",
-        # Parallels (Maison Carrée) are intact temples; their canny maps are
-        # already complete, so a moderate scale is safe.
-        "conditioning_scale": 0.55,
-        "control_guidance_end": 0.7,
-    },
-    {
-        "name": "three_quarter",
-        "title": "Three-Quarter View",
-        "prefer_folder": "architectural_models",
-        "prefer_keywords": ["drawing", "model"],
-        "fallback_folder": "parallels/pula",
-        "conditioning_scale": 0.55,
-        "control_guidance_end": 0.7,
+        "mode": "procedural",
+        "canny_scale": 0.85,         # high — we trust our own geometry
+        "depth_scale": 0.45,
+        "control_guidance_end": 0.8,
     },
     {
         "name": "side_elevation",
         "title": "Side Elevation",
-        "prefer_folder": "parallels/maison_carree",
-        "prefer_keywords": ["side"],
-        "fallback_folder": "parallels/pula",
-        "conditioning_scale": 0.55,
-        "control_guidance_end": 0.7,
+        "mode": "procedural",
+        "canny_scale": 0.85,
+        "depth_scale": 0.45,
+        "control_guidance_end": 0.8,
     },
+    {
+        "name": "three_quarter",
+        "title": "Three-Quarter View",
+        "mode": "procedural",
+        "canny_scale": 0.80,
+        "depth_scale": 0.55,          # depth carries the 3D structure here
+        "control_guidance_end": 0.8,
+    },
+    # Interior cella: no procedural option (no plan data for interior).
+    # Stays on the Ankara ruin's canny + MiDaS depth.
     {
         "name": "interior_cella",
         "title": "Interior — Cella",
+        "mode": "source",
         "prefer_folder": "full_shots",
         "prefer_keywords": ["interior", "cella", "inside"],
         "fallback_folder": "full_shots",
-        # The interior shots come from the Ankara ruin — partial walls,
-        # missing roof. Low scale + early stop so SDXL completes structure.
-        "conditioning_scale": 0.40,
-        "control_guidance_end": 0.5,
+        "canny_scale": 0.50,
+        "depth_scale": 0.40,
+        "control_guidance_end": 0.62,
     },
 ]
 
@@ -1046,73 +1050,139 @@ def generate_canonical_views(
 
     results = []
 
+    # Procedural canny+depth use documented dimensions (column counts,
+    # intercolumniation, temple footprint) extracted by analyze_plans.py.
+    # Falls back to scholarship defaults if no plans_extraction yet.
+    from src.procedural_canny import (
+        load_plan_dims_aggregated,
+        render_view as render_procedural_view,
+    )
+    plan_dims = load_plan_dims_aggregated(analysis_dir)
+    print(f"\nPlan dimensions in use:")
+    for k in ("columns_front", "columns_side", "intercolumniation_m",
+              "column_diameter_m", "temple_length_m", "temple_width_m"):
+        print(f"  {k}: {plan_dims.get(k)}")
+
+    proc_canny_dir = output_dir / "procedural"
+    proc_canny_dir.mkdir(parents=True, exist_ok=True)
+
     for view in CANONICAL_VIEWS:
         print(f"\n── {view['title']} ──────────")
 
-        candidate = None
+        mode = view.get("mode", "source")
+        source_label = None
+        canny_img = None
+        depth_img = None
 
-        # Collect preferred folder + keyword matches, score and sort
-        preferred = []
-        for a in all_analyses:
-            if a.get("source_folder") != view["prefer_folder"]:
-                continue
-            fname = a.get("source_filename", "").lower()
-            if not any(kw in fname for kw in view["prefer_keywords"]):
-                continue
-            entry = registry_map.get(a["source_filename"].strip(), {})
-            if entry.get("canny_path") and Path(entry["canny_path"]).exists():
-                preferred.append((a, entry))
+        if mode == "procedural":
+            # Synthesise conditioning from documented dimensions
+            canny_img, depth_img = render_procedural_view(view["name"], plan_dims)
+            # Persist for the web app to display
+            canny_img.save(proc_canny_dir / f"{view['name']}_canny.png")
+            depth_img.save(proc_canny_dir / f"{view['name']}_depth.png")
+            source_label = f"procedural ({view['name']} from plan dimensions)"
+            print(f"  Source: {source_label}")
 
-        if preferred:
-            preferred.sort(key=lambda x: _score_for_generation(x[0], x[1]), reverse=True)
-            candidate, _ = preferred[0]
-            print(f"  Score: {_score_for_generation(candidate, registry_map.get(candidate['source_filename'].strip(), {}))}")
-
-        # Fallback: best-scored image in fallback_folder with a canny map
-        if not candidate:
-            fallback = []
+        else:
+            # Pick the best-scored real photo for this view
+            candidate = None
+            preferred = []
             for a in all_analyses:
-                if a.get("source_folder") != view["fallback_folder"]:
+                if a.get("source_folder") != view["prefer_folder"]:
+                    continue
+                fname = a.get("source_filename", "").lower()
+                if any(bad in fname for bad in CANONICAL_BAD_KEYWORDS):
+                    continue
+                if not any(kw in fname for kw in view["prefer_keywords"]):
                     continue
                 entry = registry_map.get(a["source_filename"].strip(), {})
                 if entry.get("canny_path") and Path(entry["canny_path"]).exists():
-                    fallback.append((a, entry))
+                    preferred.append((a, entry))
 
-            if fallback:
-                fallback.sort(key=lambda x: _score_for_generation(x[0], x[1]), reverse=True)
-                candidate, _ = fallback[0]
-                print(f"  Score (fallback): {_score_for_generation(candidate, registry_map.get(candidate['source_filename'].strip(), {}))}")
+            if preferred:
+                preferred.sort(key=lambda x: _score_for_generation(x[0], x[1]), reverse=True)
+                candidate, _ = preferred[0]
 
-        if not candidate:
-            print("  ⚠ No suitable source found, skipping")
-            continue
+            if not candidate:
+                fallback = []
+                for a in all_analyses:
+                    if a.get("source_folder") != view["fallback_folder"]:
+                        continue
+                    fname = a.get("source_filename", "").lower()
+                    if any(bad in fname for bad in CANONICAL_BAD_KEYWORDS):
+                        continue
+                    entry = registry_map.get(a["source_filename"].strip(), {})
+                    if entry.get("canny_path") and Path(entry["canny_path"]).exists():
+                        fallback.append((a, entry))
+                if fallback:
+                    fallback.sort(key=lambda x: _score_for_generation(x[0], x[1]), reverse=True)
+                    candidate, _ = fallback[0]
 
-        print(f"  Source: {candidate['source_filename']}")
+            if not candidate:
+                print("  ⚠ No suitable source found, skipping")
+                continue
 
-        try:
-            canny_img = _load_canny(
-                candidate["source_filename"],
-                conditioning_registry_path,
-                candidate,
-            )
-        except Exception as e:
-            print(f"  ✗ Canny load failed: {e}")
-            continue
+            source_label = candidate["source_filename"]
+            print(f"  Source: {source_label}")
+            try:
+                canny_img = _load_canny(
+                    candidate["source_filename"],
+                    conditioning_registry_path,
+                    candidate,
+                )
+            except Exception as e:
+                print(f"  ✗ Canny load failed: {e}")
+                continue
+
+            # Optional MiDaS depth for source mode (interior cella)
+            try:
+                depth_img = load_conditioning_image(
+                    candidate["source_filename"],
+                    conditioning_registry_path,
+                    mode="depth",
+                )
+            except (ValueError, FileNotFoundError):
+                depth_img = None
 
         start = time.time()
-
         cg_end = view.get("control_guidance_end", 0.7)
-        result_image = pipe(
-            prompt=positive,
-            negative_prompt=negative,
-            image=canny_img,
-            controlnet_conditioning_scale=view["conditioning_scale"],
-            control_guidance_end=cg_end,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            width=1024,
-            height=1024,
-        ).images[0]
+
+        # Assemble multi-ControlNet inputs. If depth is available we pass
+        # [canny, depth] with separate scales — the pipeline was loaded
+        # with both ControlNets (use_canny=True, use_depth=True).
+        if depth_img is not None:
+            image_arg = [canny_img, depth_img]
+            scale_arg = [view["canny_scale"], view["depth_scale"]]
+        else:
+            image_arg = canny_img
+            scale_arg = view["canny_scale"]
+
+        try:
+            result_image = pipe(
+                prompt=positive,
+                negative_prompt=negative,
+                image=image_arg,
+                controlnet_conditioning_scale=scale_arg,
+                control_guidance_end=cg_end,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=1024,
+                height=1024,
+            ).images[0]
+        except Exception as e:
+            # Some diffusers builds reject a list for control_guidance_end
+            # when given multi-control. Retry without that arg.
+            print(f"  ! retry without control_guidance_end ({e})")
+            result_image = pipe(
+                prompt=positive,
+                negative_prompt=negative,
+                image=image_arg,
+                controlnet_conditioning_scale=scale_arg,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=1024,
+                height=1024,
+            ).images[0]
 
         # Stage 2: inpaint any leftover flat/blank patches
         inpaint_applied = False
@@ -1137,7 +1207,9 @@ def generate_canonical_views(
         provenance = {
             "view": view["name"],
             "title": view["title"],
-            "source_image": candidate["source_filename"],
+            "mode": mode,
+            "source_image": source_label,
+            "plan_dimensions_used": plan_dims if mode == "procedural" else None,
             "aggregated_from": f"{len(all_analyses)} analyses",
             "confirmed_elements": aggregated["confirmed_elements"],
             "all_citations": aggregated["all_citations"],
@@ -1146,7 +1218,9 @@ def generate_canonical_views(
             "generation_params": {
                 "num_inference_steps": num_inference_steps,
                 "guidance_scale": guidance_scale,
-                "controlnet_scale": view["conditioning_scale"],
+                "canny_scale": view["canny_scale"],
+                "depth_scale": view.get("depth_scale"),
+                "depth_used": depth_img is not None,
                 "control_guidance_end": cg_end,
                 "inpaint_stage_applied": inpaint_applied,
                 "hardware": hw.get("device"),
